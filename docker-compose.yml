@@ -1,11 +1,13 @@
 services:
   epitools-backend:
-    build: .
+    build:
+      context: ./backend
     restart: unless-stopped
-    ports:
-      - "3000:3000"
-    env_file:
-      - .env
+    expose:
+      - "3000"
+    environment:
+      - ALLOWED_TOKENS=${ALLOWED_TOKENS}
+      - PORT=3000
     volumes:
       - epitools-data:/app/data
     healthcheck:
