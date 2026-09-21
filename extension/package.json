@@ -1,0 +1,19 @@
+{
+  "name": "epitools-extension",
+  "version": "1.0.0",
+  "description": "Chrome/Firefox extension: persistent faction tags, sorting and filtering for my.epitech.eu",
+  "private": true,
+  "scripts": {
+    "build": "node build.js",
+    "typecheck": "tsc --noEmit",
+    "icons": "node scripts/make-icons.js"
+  },
+  "dependencies": {
+    "webextension-polyfill": "^0.12.0"
+  },
+  "devDependencies": {
+    "@types/webextension-polyfill": "^0.12.6",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  }
+}

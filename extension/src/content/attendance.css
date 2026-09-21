@@ -1,0 +1,154 @@
+.epitools-th,
+.epitools-td {
+  box-sizing: border-box;
+}
+
+/* Once the Faction column is added, table[data-epitools-fluid] is set and
+   every column (native and ours) switches to content-based sizing instead
+   of the site's fixed pixel widths — no column gets squeezed/truncated and
+   ours doesn't balloon into leftover space. The !important is required to
+   beat the native columns' own inline width styles. overflow-x: auto on
+   .mrt-table-container (already present) covers the rare case where content
+   still doesn't fit. */
+table[data-epitools-fluid] {
+  table-layout: auto !important;
+  width: 100% !important;
+}
+
+table[data-epitools-fluid] th,
+table[data-epitools-fluid] td {
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: none !important;
+}
+
+.epitools-th {
+  text-align: left;
+  white-space: nowrap;
+  padding: 10px;
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.epitools-td {
+  padding: 10px;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.epitools-th-sort,
+.epitools-th-filter {
+  display: inline-flex;
+  align-items: center;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  border-radius: 2px;
+  vertical-align: middle;
+}
+
+.epitools-th-sort {
+  gap: 2px;
+}
+
+.epitools-th-sort:hover,
+.epitools-th-filter:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.epitools-sort-icon {
+  display: inline-flex;
+  width: 17px;
+  height: 17px;
+  opacity: 0.7;
+}
+
+.epitools-sort-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.epitools-sort-icon-active {
+  opacity: 1;
+  color: #6ea8fe;
+}
+
+.epitools-sort-icon-desc {
+  transform: scaleY(-1);
+}
+
+.epitools-th-filter {
+  width: 22px;
+  height: 22px;
+  opacity: 0.7;
+  justify-content: center;
+}
+
+.epitools-th-filter-active {
+  opacity: 1;
+  color: #6ea8fe;
+}
+
+.epitools-badge {
+  display: inline-flex;
+  align-items: center;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  border: none;
+}
+
+.epitools-badge:hover {
+  filter: brightness(1.1);
+}
+
+.epitools-menu {
+  position: absolute;
+  z-index: 999999;
+  background: #1e1e1e;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  min-width: 160px;
+  padding: 4px;
+  font-family: inherit;
+  font-size: 13px;
+  color: #eee;
+}
+
+.epitools-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.epitools-menu-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.epitools-menu-item-active {
+  font-weight: 700;
+}
+
+.epitools-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}

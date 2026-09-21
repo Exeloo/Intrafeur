@@ -1,0 +1,23 @@
+# Copy this file (plus a .env based on .env.example) to wherever you're
+# hosting the backend, and run `docker compose -f docker-compose.prod.yml up -d`.
+# Unlike docker-compose.yml (which builds locally), this pulls the image
+# built by .github/workflows/docker-publish.yml on every push to main.
+services:
+  epitools-backend:
+    # Replace <owner>/<repo> with this GitHub repo's path (lowercase).
+    image: ghcr.io/<owner>/<repo>:latest
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    volumes:
+      - epitools-data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  epitools-data:

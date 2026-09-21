@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Intrafeur Toolbox — Settings</title>
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body>
+  <main>
+    <h1>Intrafeur Toolbox</h1>
+
+    <section>
+      <h2>Backend connection</h2>
+      <p class="hint">Point the extension at your team's shared tagging backend.</p>
+      <label>
+        API base URL
+        <input type="url" id="apiBaseUrl" placeholder="https://epitools.example.com" />
+      </label>
+      <label>
+        API token
+        <input type="password" id="apiToken" placeholder="Paste the token shared by your team" />
+      </label>
+      <button id="saveSettings" type="button">Save connection</button>
+      <p id="settingsStatus" class="status"></p>
+    </section>
+
+    <section>
+      <h2>Factions</h2>
+      <p class="hint">These are shared with every pedagogy staff member connected to the same backend.</p>
+      <div id="factionList"></div>
+      <form id="factionForm">
+        <input type="text" id="factionName" placeholder="Faction name" required />
+        <input type="color" id="factionColor" value="#4f8cff" />
+        <button type="submit">Add faction</button>
+      </form>
+      <p id="factionStatus" class="status"></p>
+    </section>
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>
