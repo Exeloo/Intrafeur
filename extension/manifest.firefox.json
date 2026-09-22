@@ -10,7 +10,11 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "epitools@epitech-toolbox.local",
-      "strict_min_version": "115.0"
+      "strict_min_version": "128.0",
+      "data_collection_permissions": {
+        "required": ["personallyIdentifyingInfo"],
+        "optional": []
+      }
     }
   },
   "permissions": ["storage"],
@@ -32,6 +36,7 @@
     "open_in_tab": true
   },
   "action": {
-    "default_title": "Intrafeur Toolbox settings"
+    "default_title": "Intrafeur Toolbox settings",
+    "default_popup": "popup/popup.html"
   }
 }

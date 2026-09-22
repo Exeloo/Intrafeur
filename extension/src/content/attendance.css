@@ -145,6 +145,12 @@ table[data-epitools-fluid] td {
   font-weight: 700;
 }
 
+.epitools-member-badge-wrap {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 10px;
+}
+
 .epitools-swatch {
   display: inline-block;
   width: 10px;

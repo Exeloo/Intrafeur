@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Intrafeur Toolbox</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <main>
+    <h1>Intrafeur Toolbox</h1>
+
+    <label class="toggle-row">
+      <input type="checkbox" id="factionsEnabled" />
+      <span>Enable faction tagging</span>
+    </label>
+    <p class="hint">
+      Turns off the Faction column, badges, and the CSV export change — on
+      this browser only. Shared faction data on the backend isn't affected;
+      other staff still see it normally.
+    </p>
+
+    <a id="openOptions" href="#">Backend &amp; faction settings…</a>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

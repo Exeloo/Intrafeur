@@ -36,15 +36,26 @@ async function saveSettings(): Promise<void> {
     return;
   }
 
+  let origin: string;
   try {
-    const origin = new URL(apiBaseUrl).origin;
+    origin = new URL(apiBaseUrl).origin;
+  } catch (err) {
+    setStatus(statusEl, `Invalid URL: ${(err as Error).message}`, 'error');
+    return;
+  }
+
+  try {
     const granted = await browser.permissions.request({ origins: [`${origin}/*`] });
     if (!granted) {
-      setStatus(statusEl, 'Permission to contact that host was not granted.', 'error');
+      setStatus(
+        statusEl,
+        `Permission to contact ${origin} was not granted, so nothing was saved. Click Save connection again and accept the browser's permission prompt.`,
+        'error',
+      );
       return;
     }
   } catch (err) {
-    setStatus(statusEl, `Invalid URL: ${(err as Error).message}`, 'error');
+    setStatus(statusEl, `Could not request permission for ${origin}: ${(err as Error).message}`, 'error');
     return;
   }
 
@@ -56,7 +67,7 @@ async function saveSettings(): Promise<void> {
 async function loadFactions(): Promise<void> {
   const listEl = requireEl<HTMLElement>('factionList');
   const statusEl = requireEl<HTMLElement>('factionStatus');
-  listEl.innerHTML = '';
+  listEl.replaceChildren();
 
   let factions: Faction[];
   try {

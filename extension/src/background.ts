@@ -24,6 +24,19 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T |
   if (!apiBaseUrl) {
     throw new Error('Intrafeur Toolbox is not configured yet: open the extension options and set the API URL.');
   }
+  if (!apiToken) {
+    throw new Error(
+      'Intrafeur Toolbox has no API token saved on this browser: open the extension options, paste the shared token in, and click Save.',
+    );
+  }
+
+  const origin = new URL(apiBaseUrl).origin;
+  const granted = await browser.permissions.contains({ origins: [`${origin}/*`] });
+  if (!granted) {
+    throw new Error(
+      `This browser has not granted Intrafeur Toolbox access to ${origin}: open the extension options and click Save connection again to re-request it.`,
+    );
+  }
 
   const url = `${apiBaseUrl.replace(/\/$/, '')}${path}`;
   const response = await fetch(url, {

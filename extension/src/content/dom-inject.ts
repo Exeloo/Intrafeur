@@ -5,16 +5,41 @@ import type { Faction, RowMeta } from '../types';
 const MARKER_ATTR = 'data-epitools-email';
 const HEADER_MARKER_ATTR = 'data-epitools-header';
 const FLUID_ATTR = 'data-epitools-fluid';
+const EXPORT_HIJACK_ATTR = 'data-epitools-export-hijacked';
 export const UNASSIGNED = '__unassigned__';
 export type FactionKey = number | typeof UNASSIGNED;
 
 // Same Tabler icons (sort arrows / vertical dots) the site's own column
 // headers use, copied from the live DOM so ours blend in instead of
-// showing plain ↕/⋮ text characters.
-const SORT_ICON_SVG =
-  '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l4 -4l4 4m-4 -4v14"></path><path d="M21 15l-4 4l-4 -4m4 4v-14"></path></svg>';
-const FILTER_ICON_SVG =
-  '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"></path><path d="M11 19a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"></path><path d="M11 5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"></path></svg>';
+// showing plain ↕/⋮ text characters. Built via createElementNS rather than
+// innerHTML — the addons-linter (rightly) flags any innerHTML assignment of
+// a non-literal string as a potential XSS vector, even when, as here, the
+// content is a fixed developer-authored constant.
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const SORT_ICON_PATHS = ['M3 9l4 -4l4 4m-4 -4v14', 'M21 15l-4 4l-4 -4m4 4v-14'];
+const FILTER_ICON_PATHS = [
+  'M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0',
+  'M11 19a1 1 0 1 0 2 0a1 1 0 1 0 -2 0',
+  'M11 5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0',
+];
+
+function buildIconSvg(paths: string[]): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('width', '100%');
+  svg.setAttribute('height', '100%');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  for (const d of paths) {
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', d);
+    svg.appendChild(path);
+  }
+  return svg;
+}
 
 export interface HeaderHandlers {
   onSortClick: () => void;
@@ -41,7 +66,16 @@ export function ensureFactionHeaderCell(theadRow: HTMLTableRowElement, handlers:
   sortBtn.className = 'epitools-th-sort';
   sortBtn.setAttribute('role', 'button');
   sortBtn.tabIndex = 0;
-  sortBtn.innerHTML = `<span class="epitools-th-label">Faction</span><span class="epitools-sort-icon">${SORT_ICON_SVG}</span>`;
+
+  const label = document.createElement('span');
+  label.className = 'epitools-th-label';
+  label.textContent = 'Faction';
+  const sortIconWrap = document.createElement('span');
+  sortIconWrap.className = 'epitools-sort-icon';
+  sortIconWrap.appendChild(buildIconSvg(SORT_ICON_PATHS));
+  sortBtn.appendChild(label);
+  sortBtn.appendChild(sortIconWrap);
+
   sortBtn.addEventListener('click', (ev) => {
     ev.stopPropagation();
     handlers.onSortClick();
@@ -57,7 +91,7 @@ export function ensureFactionHeaderCell(theadRow: HTMLTableRowElement, handlers:
   filterBtn.className = 'epitools-th-filter';
   filterBtn.setAttribute('role', 'button');
   filterBtn.tabIndex = 0;
-  filterBtn.innerHTML = FILTER_ICON_SVG;
+  filterBtn.appendChild(buildIconSvg(FILTER_ICON_PATHS));
   filterBtn.title = 'Filter by faction';
   filterBtn.addEventListener('click', (ev) => {
     ev.stopPropagation();
@@ -102,6 +136,33 @@ export function enableFluidColumns(table: HTMLTableElement): void {
   table.setAttribute(FLUID_ATTR, '1');
 }
 
+// The site's own "Export to CSV" button reads from MRT's internal column
+// model, which never learned about our DOM-injected Faction column, so its
+// CSV can't include it. Rather than add a second lookalike button, take over
+// the existing one: a capture-phase listener runs before React's own
+// bubble-phase delegated click handler ever sees the event (same technique
+// already used in attendance.ts's thead click listener to cede/steal sort
+// control from native columns), so stopping propagation here fully replaces
+// the native export instead of running alongside it.
+export function hijackExportButton(table: HTMLTableElement, onExport: () => void): void {
+  const container = table.closest('.mrt-table-paper')?.querySelector('[class*="ToolbarInternalButtons"]');
+  const btn = container?.querySelector<HTMLButtonElement>('button[aria-label="Export to CSV"]');
+  if (!btn || btn.getAttribute(EXPORT_HIJACK_ATTR) === '1') return;
+
+  btn.setAttribute(EXPORT_HIJACK_ATTR, '1');
+  btn.setAttribute('aria-label', 'Export to CSV (includes factions)');
+  btn.title = 'Export to CSV (includes factions)';
+  btn.addEventListener(
+    'click',
+    (ev) => {
+      ev.stopPropagation();
+      ev.preventDefault();
+      onExport();
+    },
+    true,
+  );
+}
+
 function readableTextColor(hexColor: string): string {
   const hex = (hexColor || '#888888').replace('#', '');
   const r = parseInt(hex.substring(0, 2), 16) || 0;
@@ -114,7 +175,7 @@ function readableTextColor(hexColor: string): string {
 // Badge filled solid with the faction's own color, with text color picked
 // for contrast against it rather than a fixed white/black.
 function renderBadge(cell: HTMLElement, faction: Faction | null): HTMLButtonElement {
-  cell.innerHTML = '';
+  cell.replaceChildren();
   const badge = document.createElement('button');
   badge.type = 'button';
   badge.className = 'epitools-badge';
@@ -252,16 +313,62 @@ export function ensureRowCell(
   return td;
 }
 
-export function markRow(tr: HTMLTableRowElement, email: string): void {
-  tr.setAttribute(MARKER_ATTR, email);
+// Same badge, for a person row that isn't a table cell — the Registered
+// Groups cards (Projects) are a repeated <div> layout (avatar + name/email
+// stack), not a <table>. `container` is that row's own flex wrapper (avatar
+// + name/email), so the badge lands as a third item alongside them. The row
+// is wrapped in a clickable <button> that navigates elsewhere, hence
+// preventDefault in addition to the usual stopPropagation.
+export function ensureMemberBadge(
+  container: HTMLElement,
+  email: string,
+  faction: Faction | null,
+  factions: Faction[],
+  onAssign: (email: string, factionId: number | null) => void,
+): HTMLElement {
+  let wrap = container.querySelector<HTMLElement>(`span[${HEADER_MARKER_ATTR}]`);
+  if (!wrap) {
+    wrap = document.createElement('span');
+    wrap.setAttribute(HEADER_MARKER_ATTR, '1');
+    wrap.className = 'epitools-member-badge-wrap';
+    container.appendChild(wrap);
+  }
+
+  const badge = renderBadge(wrap, faction);
+  badge.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    ev.preventDefault();
+    openFactionMenu(badge, factions, faction ? faction.id : null, (factionId) => {
+      onAssign(email, factionId);
+    });
+  });
+
+  return wrap;
 }
 
-export function getRowEmail(tr: HTMLTableRowElement): string | null {
-  return tr.getAttribute(MARKER_ATTR);
+export function markRow(el: HTMLElement, email: string): void {
+  el.setAttribute(MARKER_ATTR, email);
 }
 
-export function isRowMarked(tr: HTMLTableRowElement): boolean {
-  return tr.hasAttribute(MARKER_ATTR);
+export function getRowEmail(el: HTMLElement): string | null {
+  return el.getAttribute(MARKER_ATTR);
+}
+
+export function isRowMarked(el: HTMLElement): boolean {
+  return el.hasAttribute(MARKER_ATTR);
+}
+
+// Used when the faction feature is turned off live (popup toggle) so an
+// already-processed row/card is treated as fresh again if it's turned back
+// on later, rather than staying permanently skipped.
+export function unmarkRow(el: HTMLElement): void {
+  el.removeAttribute(MARKER_ATTR);
+}
+
+// Strips every Faction th/td/badge-wrap we injected under `root` (a table or
+// a member card container), used by the same live-toggle-off path.
+export function removeInjectedElements(root: ParentNode): void {
+  root.querySelectorAll(`[${HEADER_MARKER_ATTR}]`).forEach((el) => el.remove());
 }
 
 export interface SortAndFilterOptions {

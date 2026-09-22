@@ -62,17 +62,3 @@ export function extractRowOriginal(trElement: Element, maxDepth = 25): RowOrigin
   search(rootFiber, 0);
   return result;
 }
-
-// Best-effort fallback if the site's internals ever change shape: derive a
-// synthetic (non-email) key from the visible name text so tagging degrades
-// gracefully instead of silently mis-tagging rows.
-export function fallbackKeyFromText(trElement: Element): string | null {
-  const text = trElement.textContent || '';
-  const normalized = text
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/[^a-z0-9]+/g, '-');
-  return normalized ? `name:${normalized}` : null;
-}

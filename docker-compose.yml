@@ -3,8 +3,8 @@ services:
     build:
       context: ./backend
     restart: unless-stopped
-    expose:
-      - "3000"
+    ports:
+      - "3000:3000"
     environment:
       - ALLOWED_TOKENS=${ALLOWED_TOKENS}
       - PORT=3000

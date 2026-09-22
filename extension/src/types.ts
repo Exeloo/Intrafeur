@@ -9,6 +9,13 @@ export interface Settings {
   apiToken: string;
 }
 
+// storage.local (not .sync, deliberately) — a per-browser UI preference,
+// not shared/synced faction data. Read directly by the content script and
+// written directly by the popup; no background-script round-trip needed
+// since both contexts already have the "storage" permission.
+export const FACTIONS_ENABLED_KEY = 'factionsEnabled';
+export const FACTIONS_ENABLED_DEFAULT = true;
+
 export type AssignmentsMap = Record<string, number>;
 
 export interface RowMeta {

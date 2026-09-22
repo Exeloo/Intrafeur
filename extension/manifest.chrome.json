@@ -26,6 +26,7 @@
     "open_in_tab": true
   },
   "action": {
-    "default_title": "Intrafeur Toolbox settings"
+    "default_title": "Intrafeur Toolbox settings",
+    "default_popup": "popup/popup.html"
   }
 }
