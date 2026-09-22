@@ -144,14 +144,24 @@ export function enableFluidColumns(table: HTMLTableElement): void {
 // already used in attendance.ts's thead click listener to cede/steal sort
 // control from native columns), so stopping propagation here fully replaces
 // the native export instead of running alongside it.
+// The button's aria-label is localized by the site's own UI language
+// (verified live: French renders it "Exporter en CSV") — matched against
+// both so the hijack still finds it regardless of UI language.
+const EXPORT_BUTTON_LABELS = ['Export to CSV', 'Exporter en CSV'];
+
 export function hijackExportButton(table: HTMLTableElement, onExport: () => void): void {
   const container = table.closest('.mrt-table-paper')?.querySelector('[class*="ToolbarInternalButtons"]');
-  const btn = container?.querySelector<HTMLButtonElement>('button[aria-label="Export to CSV"]');
+  const btn = container
+    ? Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find((b) =>
+        EXPORT_BUTTON_LABELS.includes(b.getAttribute('aria-label') || ''),
+      )
+    : undefined;
   if (!btn || btn.getAttribute(EXPORT_HIJACK_ATTR) === '1') return;
 
+  const originalLabel = btn.getAttribute('aria-label') || 'Export to CSV';
   btn.setAttribute(EXPORT_HIJACK_ATTR, '1');
-  btn.setAttribute('aria-label', 'Export to CSV (includes factions)');
-  btn.title = 'Export to CSV (includes factions)';
+  btn.setAttribute('aria-label', `${originalLabel} (+ factions)`);
+  btn.title = `${originalLabel} (+ factions)`;
   btn.addEventListener(
     'click',
     (ev) => {

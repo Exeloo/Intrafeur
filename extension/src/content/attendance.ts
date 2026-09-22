@@ -60,17 +60,29 @@ function sendMessage<T>(type: MessageType, payload: unknown = {}): Promise<T> {
 // "Registrations" tab (+ Registered by/Registration date, email only, no
 // name), and e.g. a Kick-off session's registrations modal (just +
 // Promotion/Registration date, no Attendance tracking at all). Rather than
-// hardcode every combination, match on the "Student" column alone. A page
-// can have more than one such table in the DOM at once (a modal open over a
-// Unit's own Registrations tab underneath) — prefer one that's actually
-// inside an open modal, since that's what's in front of the user; Mantine
-// portals modals to the end of the DOM, so plain document order isn't a
-// reliable enough signal on its own.
+// hardcode every combination, match on the "Student" column alone — but by
+// its *content* (an email-shaped <p> in the first cell, same signal
+// buildRowMeta/findMemberContainers already use), not by the header text.
+// The site's own UI is localized (e.g. French), which renders "Student" as
+// something else entirely — matching header text broke the whole feature on
+// non-English UIs; email addresses aren't translated. A page can have more
+// than one such table in the DOM at once (a modal open over a Unit's own
+// Registrations tab underneath) — prefer one that's actually inside an open
+// modal, since that's what's in front of the user; Mantine portals modals to
+// the end of the DOM, so plain document order isn't a reliable enough signal
+// on its own.
+function tableHasStudentRows(t: HTMLTableElement): boolean {
+  return Array.from(t.querySelectorAll('tbody tr')).some((tr) => {
+    if (tr.querySelector('td[colspan]')) return false; // placeholder row
+    const firstCell = tr.querySelector('td');
+    if (!firstCell) return false;
+    return Array.from(firstCell.querySelectorAll('p')).some((p) => /\S+@\S+\.\S+/.test(p.textContent || ''));
+  });
+}
+
 function findTable(): HTMLTableElement | undefined {
   const tables = Array.from(document.querySelectorAll('table'));
-  const candidates = tables.filter((t) =>
-    Array.from(t.querySelectorAll('th')).some((th) => th.textContent?.trim() === 'Student'),
-  );
+  const candidates = tables.filter(tableHasStudentRows);
   return candidates.find((t) => t.closest('[class*="mantine-Modal"]')) ?? candidates[0];
 }
 
@@ -205,6 +217,13 @@ function formatRegistrationDate(text: string): string {
   return isNaN(parsed.getTime()) ? trimmed : parsed.toISOString();
 }
 
+// The site's UI is localized (verified live: French renders these headers as
+// "Promotion" [same word], "Date d'inscription", "Présences") — each column
+// is looked up by whichever translation is actually present, so this keeps
+// working regardless of the site's current UI language.
+const REGISTRATION_DATE_LABELS = ['Registration date', "Date d'inscription"];
+const ATTENDANCE_LABELS = ['Attendance', 'Présences'];
+
 // Matches the site's own native export (Downloads/registrations.csv):
 // header "Student" holds the email itself (not a display name — the native
 // export doesn't have a name column at all), followed by whichever of
@@ -217,15 +236,16 @@ function formatRegistrationDate(text: string): string {
 // (i.e. whatever sort, if any, is active), since only the filter was asked
 // to be ignored.
 function buildCsvRows(table: HTMLTableElement): string[][] {
-  const colIndex: Record<string, number> = {};
-  Array.from(table.querySelectorAll('thead th')).forEach((th, i) => {
-    if (th === factionHeaderEl) return;
-    const label = th.textContent?.trim();
-    if (label) colIndex[label] = i;
-  });
+  const headers = Array.from(table.querySelectorAll('thead th'));
+  const colIndexFor = (labels: string[]): number | undefined => {
+    const idx = headers.findIndex((th) => th !== factionHeaderEl && labels.includes(th.textContent?.trim() || ''));
+    return idx === -1 ? undefined : idx;
+  };
+  const promotionIdx = colIndexFor(['Promotion']);
+  const registrationIdx = colIndexFor(REGISTRATION_DATE_LABELS);
+  const attendanceIdx = colIndexFor(ATTENDANCE_LABELS);
 
-  const cellText = (tr: HTMLTableRowElement, columnLabel: string): string => {
-    const idx = colIndex[columnLabel];
+  const cellText = (tr: HTMLTableRowElement, idx: number | undefined): string => {
     if (idx == null) return '';
     return (tr.children[idx] as HTMLElement | undefined)?.textContent?.trim() || '';
   };
@@ -239,9 +259,9 @@ function buildCsvRows(table: HTMLTableElement): string[][] {
     const meta = state.rowsMeta.get(tr);
     rows.push([
       meta?.email || '',
-      cellText(tr, 'Promotion'),
-      formatRegistrationDate(cellText(tr, 'Registration date')),
-      formatAttendance(cellText(tr, 'Attendance')),
+      cellText(tr, promotionIdx),
+      formatRegistrationDate(cellText(tr, registrationIdx)),
+      formatAttendance(cellText(tr, attendanceIdx)),
       meta && meta.factionId != null ? meta.factionName : 'Unassigned',
     ]);
   }
