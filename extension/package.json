@@ -1,10 +1,14 @@
 {
   "name": "epitools-extension",
   "version": "1.0.0",
-  "description": "Chrome/Firefox extension: persistent faction tags, sorting and filtering for my.epitech.eu",
+  "description": "Intrafeur: Chrome/Firefox extension with tools for the Epitech intranet (my.epitech.eu)",
   "private": true,
   "scripts": {
     "build": "node build.js",
+    "watch": "node build.js --watch",
+    "dev:firefox": "web-ext run -s dist/firefox --firefox-profile .dev-profile/firefox --profile-create-if-missing --keep-profile-changes --start-url https://my.epitech.eu",
+    "dev:chrome": "web-ext run -t chromium -s dist/chrome --chromium-profile .dev-profile/chromium --profile-create-if-missing --keep-profile-changes --start-url https://my.epitech.eu",
+    "release:firefox": "./scripts/release-firefox.sh",
     "typecheck": "tsc --noEmit",
     "icons": "node scripts/make-icons.js"
   },
@@ -14,6 +18,7 @@
   "devDependencies": {
     "@types/webextension-polyfill": "^0.12.6",
     "esbuild": "^0.28.2",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "web-ext": "^10.8.0"
   }
 }

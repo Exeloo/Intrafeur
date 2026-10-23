@@ -2,9 +2,15 @@ import express, { type Request, type Response, type NextFunction } from 'express
 import { requireAuth } from './auth';
 import factionsRouter from './routes/factions';
 import assignmentsRouter from './routes/assignments';
+import releasesRouter from './routes/releases';
 
 const app = express();
+app.set('trust proxy', true);
 const PORT = process.env.PORT || 3000;
+
+// Mounted before express.json(): the release upload reads a raw XPI body.
+// Public (no requireAuth): Firefox fetches updates without credentials.
+app.use('/extension', releasesRouter);
 
 app.use(express.json());
 

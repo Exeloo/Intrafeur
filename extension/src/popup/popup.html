@@ -2,12 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Intrafeur Toolbox</title>
+  <title>Intrafeur</title>
   <link rel="stylesheet" href="popup.css" />
 </head>
 <body>
   <main>
-    <h1>Intrafeur Toolbox</h1>
+    <h1>Intrafeur</h1>
 
     <label class="toggle-row">
       <input type="checkbox" id="factionsEnabled" />
@@ -17,6 +17,34 @@
       Turns off the Faction column, badges, and the CSV export change — on
       this browser only. Shared faction data on the backend isn't affected;
       other staff still see it normally.
+    </p>
+
+    <label class="toggle-row">
+      <input type="checkbox" id="unitFiltersEnabled" />
+      <span>Enable module filter presets</span>
+    </label>
+    <p class="hint">
+      Adds a preset selector with Save/Reset buttons to the “Current units”
+      table on My units, and restores the selected preset when the table
+      loads.
+    </p>
+
+    <label class="toggle-row">
+      <input type="checkbox" id="eventInfoEnabled" />
+      <span>Enable event “Copy info” button</span>
+    </label>
+    <p class="hint">
+      Adds a “Copy info” button to planning event details that copies a
+      standardized description (module, project, type, links).
+    </p>
+
+    <label class="toggle-row">
+      <input type="checkbox" id="evalSheetEnabled" />
+      <span>Enable evaluation sheet (PDF)</span>
+    </label>
+    <p class="hint">
+      Adds a “Fiche d'évaluation” button to planning events (one per slot
+      for slot-based events) that downloads a printable grading sheet.
     </p>
 
     <a id="openOptions" href="#">Backend &amp; faction settings…</a>

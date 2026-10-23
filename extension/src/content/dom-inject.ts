@@ -23,7 +23,7 @@ const FILTER_ICON_PATHS = [
   'M11 5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0',
 ];
 
-function buildIconSvg(paths: string[]): SVGSVGElement {
+export function buildIconSvg(paths: string[]): SVGSVGElement {
   const svg = document.createElementNS(SVG_NS, 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');
   svg.setAttribute('width', '100%');
@@ -49,7 +49,11 @@ export interface HeaderHandlers {
 // Mirrors the native columns' own header chrome (label + sort arrow + a
 // "..." menu button) instead of a separate toolbar, so Faction sort/filter
 // lives in the same place the user already looks for Student/Promotion/etc.
-export function ensureFactionHeaderCell(theadRow: HTMLTableRowElement, handlers: HeaderHandlers): HTMLTableCellElement {
+export function ensureFactionHeaderCell(
+  theadRow: HTMLTableRowElement,
+  handlers: HeaderHandlers,
+  insertAfter?: HTMLTableCellElement | null,
+): HTMLTableCellElement {
   const existing = theadRow.querySelector<HTMLTableCellElement>(`th[${HEADER_MARKER_ATTR}]`);
   if (existing) return existing;
 
@@ -106,7 +110,11 @@ export function ensureFactionHeaderCell(theadRow: HTMLTableRowElement, handlers:
 
   th.appendChild(sortBtn);
   th.appendChild(filterBtn);
-  theadRow.appendChild(th);
+  if (insertAfter && insertAfter.parentElement === theadRow) {
+    insertAfter.after(th);
+  } else {
+    theadRow.appendChild(th);
+  }
   return th;
 }
 
@@ -303,13 +311,18 @@ export function ensureRowCell(
   faction: Faction | null,
   factions: Faction[],
   onAssign: (email: string, factionId: number | null) => void,
+  insertAfter?: HTMLTableCellElement | null,
 ): HTMLTableCellElement {
   let td = tr.querySelector<HTMLTableCellElement>(`td[${HEADER_MARKER_ATTR}]`);
   if (!td) {
     td = document.createElement('td');
     td.setAttribute(HEADER_MARKER_ATTR, '1');
     td.className = 'epitools-td';
-    tr.appendChild(td);
+    if (insertAfter && insertAfter.parentElement === tr) {
+      insertAfter.after(td);
+    } else {
+      tr.appendChild(td);
+    }
   }
 
   const badge = renderBadge(td, faction);

@@ -8,6 +8,8 @@ services:
     environment:
       - ALLOWED_TOKENS=${ALLOWED_TOKENS}
       - PORT=3000
+      - RELEASE_TOKEN=${RELEASE_TOKEN:-}
+      - PUBLIC_URL=${PUBLIC_URL:-}
     volumes:
       - epitools-data:/app/data
     healthcheck:

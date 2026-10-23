@@ -1,0 +1,200 @@
+.epitools-unit-filters-toolbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 8px;
+}
+
+.epitools-unit-filters-select {
+  background: #1e1e1e;
+  color: #e6e6e6;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 13px;
+  max-width: 160px;
+}
+
+.epitools-unit-filters-save-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #1e1e1e;
+  color: #e6e6e6;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.epitools-unit-filters-save-btn:hover {
+  background: #2a2a2a;
+}
+
+.epitools-unit-filters-save-icon {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+}
+
+.epitools-unit-filters-loader {
+  position: absolute;
+  inset: 0;
+  z-index: 999999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(14, 14, 14, 0.72);
+  color: #e6e6e6;
+  font-size: 13px;
+  backdrop-filter: blur(1px);
+}
+
+.epitools-unit-filters-loader-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: #e6e6e6;
+  border-radius: 50%;
+  animation: epitools-spin 0.7s linear infinite;
+}
+
+@keyframes epitools-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.epitools-unit-filters-clear-warning {
+  position: absolute;
+  z-index: 1000000;
+  max-width: 320px;
+  background: #3a2a10;
+  color: #ffd88a;
+  border: 1px solid rgba(255, 216, 138, 0.4);
+  border-radius: 6px;
+  padding: 8px 28px 8px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+.epitools-unit-filters-clear-warning-close {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  background: none;
+  border: none;
+  color: #ffd88a;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.epitools-unit-filters-reset-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #1e1e1e;
+  color: #e6e6e6;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.epitools-unit-filters-reset-btn:hover {
+  background: #2a2a2a;
+}
+
+.epitools-unit-filters-reset-icon {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+}
+
+.epitools-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 1000000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.epitools-modal {
+  background: #1e1e1e;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  min-width: 320px;
+  padding: 20px;
+  color: #e6e6e6;
+  font-size: 14px;
+}
+
+.epitools-modal-title {
+  margin: 0 0 14px;
+  font-size: 16px;
+}
+
+.epitools-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.epitools-modal-radio-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.epitools-modal-radio-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.epitools-modal-field {
+  background: #141414;
+  color: #e6e6e6;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 14px;
+}
+
+.epitools-modal-error {
+  color: #ff6b6b;
+  font-size: 13px;
+  margin: 0;
+}
+
+.epitools-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.epitools-modal-actions button {
+  background: #2a2a2a;
+  color: #e6e6e6;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.epitools-modal-primary {
+  background: #3b82f6 !important;
+  border-color: #3b82f6 !important;
+  color: #fff !important;
+}

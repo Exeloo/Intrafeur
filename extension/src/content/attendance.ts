@@ -71,12 +71,22 @@ function sendMessage<T>(type: MessageType, payload: unknown = {}): Promise<T> {
 // modal, since that's what's in front of the user; Mantine portals modals to
 // the end of the DOM, so plain document order isn't a reliable enough signal
 // on its own.
+// The Student cell isn't always the row's first <td> — some views (e.g. a
+// registrations table where the viewer can select rows and unregister
+// students) add a leading checkbox column and/or a trailing Actions column
+// around it, depending on the viewer's permissions on that page. Scan every
+// cell for the one holding an email-shaped <p> rather than assuming a fixed
+// position.
+function findStudentCell(tr: HTMLTableRowElement): HTMLTableCellElement | undefined {
+  return Array.from(tr.querySelectorAll('td')).find((td) =>
+    Array.from(td.querySelectorAll('p')).some((p) => /\S+@\S+\.\S+/.test(p.textContent || '')),
+  );
+}
+
 function tableHasStudentRows(t: HTMLTableElement): boolean {
-  return Array.from(t.querySelectorAll('tbody tr')).some((tr) => {
+  return Array.from(t.querySelectorAll<HTMLTableRowElement>('tbody tr')).some((tr) => {
     if (tr.querySelector('td[colspan]')) return false; // placeholder row
-    const firstCell = tr.querySelector('td');
-    if (!firstCell) return false;
-    return Array.from(firstCell.querySelectorAll('p')).some((p) => /\S+@\S+\.\S+/.test(p.textContent || ''));
+    return findStudentCell(tr) !== undefined;
   });
 }
 
@@ -123,9 +133,12 @@ function factionById(id: number | null): Faction | null {
 // unmarked, so it's simply retried on the next mutation pass instead of
 // permanently locking in a synthetic key that would never match the
 // student's real email used elsewhere (CSV export, other pages' tags, ...).
-function buildRowMeta(tr: HTMLTableRowElement): { email: string; fullName: string } | null {
-  const firstCell = tr.querySelector('td');
-  const paragraphs = firstCell ? Array.from(firstCell.querySelectorAll('p')) : [];
+function buildRowMeta(
+  tr: HTMLTableRowElement,
+  precomputedStudentCell?: HTMLTableCellElement,
+): { email: string; fullName: string } | null {
+  const studentCell = precomputedStudentCell ?? findStudentCell(tr);
+  const paragraphs = studentCell ? Array.from(studentCell.querySelectorAll('p')) : [];
   const emailParagraph = paragraphs.find((p) => p.textContent?.includes('@'));
 
   if (emailParagraph) {
@@ -144,9 +157,9 @@ function buildRowMeta(tr: HTMLTableRowElement): { email: string; fullName: strin
   return null;
 }
 
-function refreshRowBadge(tr: HTMLTableRowElement, meta: RowMeta): void {
+function refreshRowBadge(tr: HTMLTableRowElement, meta: RowMeta, insertAfter?: HTMLTableCellElement | null): void {
   const faction = factionById(meta.factionId);
-  ensureRowCell(tr, meta.email, faction, state.factions, onAssign);
+  ensureRowCell(tr, meta.email, faction, state.factions, onAssign, insertAfter);
 }
 
 // Registered Groups cards (Projects pages): each leader/member row is a
@@ -288,20 +301,49 @@ function exportCsv(table: HTMLTableElement): void {
   downloadCsv(buildCsvRows(table));
 }
 
+// Placed right after the Student/Login column (wherever that lands — it
+// isn't always index 0, e.g. a leading row-select checkbox column) rather
+// than appended after every other column, since on wide tables (an
+// Achievements tab can have 8+ task columns) an appended Faction column ends
+// up far off to the right, easy to miss and awkward to use. The column's
+// position is read fresh from the DOM on each pass — not cached — so it
+// still tracks correctly if a column gets added/removed/reordered.
+// Only applied to tables embedded directly in the page (e.g. Achievements) —
+// the Attendance/Registrations modal explicitly keeps the original
+// appended-at-the-end placement, per the user's own request to roll that
+// one back while keeping the reposition for Achievements.
+function studentColumnIndex(tbody: HTMLTableSectionElement): number | undefined {
+  for (const tr of Array.from(tbody.querySelectorAll<HTMLTableRowElement>('tr'))) {
+    if (isPlaceholderRow(tr)) continue;
+    const cell = findStudentCell(tr);
+    if (cell) return Array.from(tr.children).indexOf(cell);
+  }
+  return undefined;
+}
+
 function processRows(table: HTMLTableElement): void {
   const theadRow = table.querySelector<HTMLTableRowElement>('thead tr');
+  const tbody = table.querySelector('tbody');
+  const repositionNextToStudent = !table.closest('[class*="mantine-Modal"]');
+  const studentIdx = repositionNextToStudent && tbody ? studentColumnIndex(tbody) : undefined;
+
   if (theadRow) {
-    factionHeaderEl = ensureFactionHeaderCell(theadRow, {
-      onSortClick: onFactionSortClick,
-      onFilterClick: onFactionFilterClick,
-    });
+    const headerInsertAfter =
+      studentIdx != null ? (theadRow.children[studentIdx] as HTMLTableCellElement | undefined) : undefined;
+    factionHeaderEl = ensureFactionHeaderCell(
+      theadRow,
+      {
+        onSortClick: onFactionSortClick,
+        onFilterClick: onFactionFilterClick,
+      },
+      headerInsertAfter,
+    );
     setFactionHeaderSortIcon(factionHeaderEl, state.sortDir);
     setFactionHeaderFilterActive(factionHeaderEl, state.filterFactionIds.size > 0);
     enableFluidColumns(table);
     hijackExportButton(table, () => exportCsv(table));
   }
 
-  const tbody = table.querySelector('tbody');
   if (!tbody) return;
 
   for (const tr of Array.from(tbody.querySelectorAll('tr'))) {
@@ -313,7 +355,8 @@ function processRows(table: HTMLTableElement): void {
     if (isRowMarked(tr) && state.rowsMeta.has(tr)) continue;
     if (isPlaceholderRow(tr)) continue;
 
-    const rowMeta = buildRowMeta(tr);
+    const studentCell = findStudentCell(tr);
+    const rowMeta = buildRowMeta(tr, studentCell);
     if (!rowMeta) continue;
     const { email, fullName } = rowMeta;
 
@@ -321,7 +364,7 @@ function processRows(table: HTMLTableElement): void {
     const factionId = state.assignments[email] ?? null;
     const meta: RowMeta = { email, fullName, factionId, factionName: factionById(factionId)?.name || '' };
     state.rowsMeta.set(tr, meta);
-    refreshRowBadge(tr, meta);
+    refreshRowBadge(tr, meta, repositionNextToStudent ? studentCell : undefined);
   }
 }
 
@@ -534,7 +577,19 @@ function stopWatching(): void {
 }
 
 async function initFeatureToggle(): Promise<void> {
-  const stored = await browser.storage.local.get({ [FACTIONS_ENABLED_KEY]: FACTIONS_ENABLED_DEFAULT });
+  let stored: Record<string, unknown>;
+  try {
+    stored = await browser.storage.local.get({ [FACTIONS_ENABLED_KEY]: FACTIONS_ENABLED_DEFAULT });
+  } catch {
+    // Reloading the extension (chrome://extensions -> refresh) tears down
+    // its old runtime while any tab that already had this content script
+    // injected keeps running the old instance — every browser.* call it
+    // makes from then on throws "Extension context invalidated". There's no
+    // recovery from inside that dead instance; the tab just needs a refresh
+    // to pick up the new one, same as any other extension reload. Bail out
+    // quietly instead of surfacing an unhandled rejection in the console.
+    return;
+  }
   if (stored[FACTIONS_ENABLED_KEY] !== false) startWatching();
 
   browser.storage.onChanged.addListener((changes, areaName) => {

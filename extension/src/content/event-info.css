@@ -1,0 +1,17 @@
+.epitools-copy-info-btn {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 8px;
+  background: #1e1e1e;
+  color: #e6e6e6;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 13px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.epitools-copy-info-btn:hover {
+  background: #2a2a2a;
+}
