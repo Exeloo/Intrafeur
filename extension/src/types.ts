@@ -48,7 +48,13 @@ export type MessageType =
   | 'updateFaction'
   | 'deleteFaction'
   | 'getSettings'
-  | 'saveSettings';
+  | 'saveSettings'
+  | 'intrastekMe'
+  | 'intrastekStatus'
+  | 'intrastekSet'
+  | 'intrastekRemove'
+  | 'intrastekApprove'
+  | 'intrastekCancel';
 
 export interface Message<P = unknown> {
   type: MessageType;
@@ -178,3 +184,97 @@ export const UNIT_FILTER_DEFAULT_COLUMNS: UnitFilterColumns = {
   endDate: '',
   registrations: '',
 };
+
+// --- Intrastek (AER activity staffing, https://intrastek.epistone.fr) ---
+// All in storage.local: the API key is a personal secret and must never be
+// synced across browsers (storage.sync) nor reach the page's MAIN world.
+// No key saved = the whole feature is off (no popup toggle on purpose).
+export const INTRASTEK_API_URL_KEY = 'intrastekApiUrl';
+export const INTRASTEK_API_URL_DEFAULT = 'https://api-intrastek.epistone.fr';
+export const INTRASTEK_API_KEY_KEY = 'intrastekApiKey';
+// Group targeted by the planning actions; '' / missing = the user's own group.
+export const INTRASTEK_DEFAULT_GROUP_KEY = 'intrastekDefaultGroupId';
+// "Intrastek mode" on the planning (block colours + right-click menu).
+export const INTRASTEK_MODE_KEY = 'intrastekModeEnabled';
+
+// Contract with the Intrastek API's /extension/* routes (X-Api-Key auth).
+export type IntrastekScope = 'INTRANET_READ' | 'INTRANET_WRITE';
+export type IntrastekProposalKind = 'INIT' | 'UPDATE' | 'REMOVE';
+export type IntrastekProposalStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+export type IntrastekActivityStatus = 'DRAFT' | 'SUBSCRIPTION' | 'ASSIGNMENT' | 'VALIDATED';
+
+export interface IntrastekGroup {
+  id: string;
+  name: string;
+}
+
+export interface IntrastekMe {
+  user: { id: string; firstName: string; lastName: string; email: string };
+  isAdmin: boolean;
+  scopes: IntrastekScope[];
+  groups: IntrastekGroup[];
+  defaultGroupId: string | null;
+}
+
+export interface IntrastekActivity {
+  id: string;
+  groupId: string;
+  duplicateId: number;
+  nbUserAsk: number;
+  status: IntrastekActivityStatus;
+  start: string;
+  end: string;
+  assignedCount: number;
+}
+
+export interface IntrastekProposal {
+  id: string;
+  kind: IntrastekProposalKind;
+  status: IntrastekProposalStatus;
+  groupId: string;
+  nbUserAsk: number | null;
+  proposedBy: { id: string; firstName: string; lastName: string };
+  mine: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface IntrastekEventState {
+  eventId: number;
+  activities: IntrastekActivity[];
+  proposals: IntrastekProposal[];
+}
+
+export interface IntrastekWriteResult {
+  result: 'applied' | 'proposed';
+  state: IntrastekEventState;
+}
+
+// Intrastek handlers never throw across runtime.sendMessage (only an
+// Error's message would survive): they resolve this envelope so the UI can
+// branch on the status (e.g. 409 -> "Remove anyway").
+export type IntrastekResponse<T> = { ok: true; data: T } | { ok: false; status: number; message: string };
+
+export interface IntrastekMePayload {
+  // Options page "Test connection": try the form values before saving them.
+  apiUrl?: string;
+  apiKey?: string;
+}
+export interface IntrastekStatusPayload {
+  eventIds: number[];
+}
+export interface IntrastekSetPayload {
+  eventId: number;
+  groupId: string;
+  nbUserAsk: number;
+}
+export interface IntrastekRemovePayload {
+  eventId: number;
+  groupId: string;
+  force?: boolean;
+}
+export interface IntrastekProposalPayload {
+  proposalId: string;
+  /** Approve only: apply a REMOVE proposal even when AERs are assigned (the API's 409). */
+  force?: boolean;
+}

@@ -172,9 +172,16 @@ function check(): void {
 
 let debounceTimer: number | undefined;
 
+// Throttled, not debounced: run 150 ms after the first mutation and ignore
+// the next ones until then. The site rewrites its <style> tags every ~100 ms
+// on some views (e.g. planning with several semesters selected), so a
+// debounce that restarts on every mutation would starve check() forever.
 function scheduleCheck(): void {
-  window.clearTimeout(debounceTimer);
-  debounceTimer = window.setTimeout(check, 150);
+  if (debounceTimer !== undefined) return;
+  debounceTimer = window.setTimeout(() => {
+    debounceTimer = undefined;
+    check();
+  }, 150);
 }
 
 new MutationObserver(scheduleCheck).observe(document.body, { childList: true, subtree: true });

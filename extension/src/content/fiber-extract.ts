@@ -248,3 +248,65 @@ export function findSlotsList(root: Element, maxNodes = 20000): { slots: EventSl
   }
   return null;
 }
+
+// --- Planning calendar blocks (Intrastek tagging, MAIN world only) ---
+
+// The planning calendar is FullCalendar: each block is a
+// `div.scheduler-event[role=button]` whose fiber (verified live: depth 1)
+// has `memoizedProps.renderProps.event`, a FullCalendar EventApi. Its `id`
+// is the intranet event id as a string and `extendedProps` holds the
+// intranet event record.
+export interface SchedulerEvent {
+  id: string;
+  fullTitle: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  unitCode: string | null;
+  rooms: { name?: string | null }[] | null;
+}
+
+interface SchedulerFiberNode {
+  memoizedProps?: { renderProps?: { event?: unknown } | null } | null;
+  return?: SchedulerFiberNode | null;
+}
+
+interface EventApiLike {
+  id?: unknown;
+  title?: unknown;
+  start?: unknown;
+  end?: unknown;
+  extendedProps?: Record<string, unknown> | null;
+}
+
+function asString(value: unknown): string | null {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return null;
+}
+
+function asIso(value: unknown): string | null {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString();
+  return asString(value);
+}
+
+export function extractSchedulerEvent(el: Element, maxDepth = 5): SchedulerEvent | null {
+  const fiberKey = findFiberKey(el);
+  if (!fiberKey) return null;
+  let fiber: SchedulerFiberNode | null | undefined = (el as unknown as Record<string, SchedulerFiberNode>)[fiberKey];
+  for (let depth = 0; fiber && depth <= maxDepth; depth++, fiber = fiber.return) {
+    const event = fiber.memoizedProps?.renderProps?.event as EventApiLike | undefined;
+    if (!event || typeof event !== 'object') continue;
+    const ext = event.extendedProps && typeof event.extendedProps === 'object' ? event.extendedProps : {};
+    const id = asString(ext.id) ?? asString(event.id);
+    if (!id) continue;
+    return {
+      id,
+      fullTitle: asString(ext.fullTitle) ?? asString(event.title),
+      startDate: asIso(ext.startDate) ?? asIso(event.start),
+      endDate: asIso(ext.endDate) ?? asIso(event.end),
+      unitCode: asString(ext.unitCode),
+      rooms: Array.isArray(ext.rooms) ? (ext.rooms as { name?: string | null }[]) : null,
+    };
+  }
+  return null;
+}

@@ -120,3 +120,61 @@ button:hover {
   font-size: 12px;
   padding: 4px 8px;
 }
+
+select {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 8px 10px;
+  box-sizing: border-box;
+  background: #1e1e1e;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  color: inherit;
+  font-size: 14px;
+}
+
+.secret-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.secret-row input[type="password"],
+.secret-row input[type="text"] {
+  flex: 1;
+}
+
+.inline-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 0 0;
+  white-space: nowrap;
+}
+
+.button-row {
+  display: flex;
+  gap: 8px;
+}
+
+button.secondary {
+  background: transparent;
+}
+
+.me-box {
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+
+.field {
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.field-label {
+  margin: 0;
+}

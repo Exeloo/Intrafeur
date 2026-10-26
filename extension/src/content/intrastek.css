@@ -1,0 +1,352 @@
+/* Intrastek (isolated world, injected on every my.epitech.eu page). Generic
+   .epitools-modal* rules come from unit-filters.css, .epitools-menu* from
+   attendance.css. */
+
+/* Event modal header button */
+.epitools-ik-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 8px;
+  background: #1e1e1e;
+  color: #e6e6e6;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 13px;
+  line-height: 1.2;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.epitools-ik-btn:hover {
+  background: #2a2a2a;
+}
+
+.epitools-ik-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  box-sizing: border-box;
+}
+
+.epitools-ik-dot--initialized {
+  background: #2fb344;
+  border-color: #2fb344;
+}
+
+.epitools-ik-dot--proposed {
+  background: #f59f00;
+  border-color: #f59f00;
+}
+
+.epitools-ik-dot--none {
+  background: #868e96;
+  border-color: #868e96;
+}
+
+/* Popup (mounted inside the intranet's Mantine dialog) and mini-prompt.
+   Own backdrop classes: never .epitools-modal-backdrop (closeSaveFilterModal
+   removes those) nor .epitools-es-backdrop. */
+.epitools-ik-backdrop,
+.epitools-ik-prompt-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 1000000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.epitools-ik-modal,
+.epitools-ik-prompt {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
+}
+
+.epitools-ik-prompt {
+  width: min(360px, calc(100vw - 32px));
+}
+
+.epitools-ik-modal .epitools-modal-title {
+  margin: 0;
+}
+
+.epitools-ik-modal button,
+.epitools-ik-prompt button {
+  background: #2a2a2a;
+  color: #e6e6e6;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  padding: 5px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.epitools-ik-modal button:disabled,
+.epitools-ik-prompt button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.epitools-ik-actions {
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.epitools-ik-event-title {
+  font-weight: 600;
+}
+
+.epitools-ik-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.epitools-ik-row .epitools-modal-field {
+  flex: 1;
+  min-width: 0;
+}
+
+.epitools-ik-label {
+  font-weight: 600;
+  font-size: 13px;
+  min-width: 96px;
+}
+
+.epitools-ik-number {
+  max-width: 96px;
+}
+
+.epitools-ik-hint {
+  opacity: 0.65;
+  font-size: 12px;
+}
+
+.epitools-ik-state {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+
+.epitools-ik-proposal {
+  color: #f5b041;
+  padding-left: 12px;
+}
+
+.epitools-ik-message {
+  margin: 0;
+  font-size: 13px;
+}
+
+.epitools-ik-message--error {
+  color: #ff6b6b;
+}
+
+.epitools-ik-message--info {
+  color: #f5b041;
+}
+
+.epitools-ik-danger {
+  color: #ff8a8a !important;
+}
+
+/* Right-click menu (a .epitools-menu) */
+.epitools-ik-menu {
+  max-width: 320px;
+}
+
+.epitools-ik-menu .epitools-menu-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.epitools-ik-menu-title {
+  font-weight: 700;
+  padding: 6px 8px 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.epitools-ik-menu-note {
+  padding: 2px 8px 6px;
+  font-size: 12px;
+  color: #f5b041;
+}
+
+.epitools-ik-menu-select {
+  display: block;
+  width: calc(100% - 16px);
+  margin: 2px 8px 6px;
+  background: #141414;
+  color: #e6e6e6;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+
+/* Toast */
+.epitools-ik-toast {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 1000001;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 420px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: #1e1e1e;
+  color: #e6e6e6;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  font-size: 13px;
+}
+
+.epitools-ik-toast--success {
+  border-color: #2fb344;
+}
+
+.epitools-ik-toast--error {
+  border-color: #ff6b6b;
+}
+
+.epitools-ik-toast button {
+  background: #2a2a2a;
+  color: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.epitools-ik-toast .epitools-ik-toast-close {
+  border: none;
+  background: none;
+  font-size: 16px;
+  padding: 0 2px;
+}
+
+/* Intrastek mode toggle (a clone of the site's header button) */
+.epitools-ik-mode-btn.epitools-ik-mode-on {
+  box-shadow: 0 0 0 2px #2fb344;
+}
+
+/* Calendar blocks. Outline with a negative offset: drawn inside the block,
+   so FullCalendar's harness can't clip it. */
+.scheduler-event.epitools-ik-initialized {
+  outline: 2px solid #2fb344 !important;
+  outline-offset: -2px;
+}
+
+.scheduler-event.epitools-ik-proposed {
+  outline: 2px dashed #f59f00 !important;
+  outline-offset: -2px;
+}
+
+.scheduler-event.epitools-ik-none {
+  opacity: 0.45;
+}
+
+.epitools-ik-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 2;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 10px;
+  line-height: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Legend under the planning toolbar */
+.epitools-ik-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  margin: 6px 0;
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+.epitools-ik-legend-body {
+  display: contents;
+}
+
+.epitools-ik-legend-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.epitools-ik-group-select {
+  background: #1e1e1e;
+  color: #e9ecef;
+  border: 1px solid #495057;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font: inherit;
+  font-weight: 400;
+}
+
+.epitools-ik-group-select:disabled {
+  opacity: 0.7;
+}
+
+.epitools-ik-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.epitools-ik-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 10px;
+  border-radius: 2px;
+  box-sizing: border-box;
+}
+
+.epitools-ik-swatch--initialized {
+  border: 2px solid #2fb344;
+}
+
+.epitools-ik-swatch--proposed {
+  border: 2px dashed #f59f00;
+}
+
+.epitools-ik-swatch--none {
+  background: #868e96;
+  opacity: 0.45;
+}
+
+.epitools-ik-legend-error {
+  color: #ff6b6b;
+}

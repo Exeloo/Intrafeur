@@ -25,6 +25,40 @@
     </section>
 
     <section>
+      <h2>Intrastek</h2>
+      <p class="hint">
+        Staffing of AER activities from the planning (event button and Intrastek mode).
+        Ask an Intrastek admin for a personal extension key; it is stored on this browser only.
+        Without a key the feature stays hidden.
+      </p>
+      <label>
+        Intrastek API URL
+        <input type="url" id="intrastekApiUrl" placeholder="https://api-intrastek.epistone.fr" />
+      </label>
+      <div class="field">
+        <label for="intrastekApiKey" class="field-label">Extension key</label>
+        <span class="secret-row">
+          <input type="password" id="intrastekApiKey" placeholder="ik_…" autocomplete="off" spellcheck="false" />
+          <label class="inline-check"><input type="checkbox" id="intrastekShowKey" /> Show</label>
+        </span>
+        <p class="hint">Teachers and admins create their own key in Intrastek → Profile → Intrafeur extension keys.</p>
+      </div>
+      <label>
+        Default group
+        <select id="intrastekDefaultGroup" disabled>
+          <option value="">Test the connection to load your groups</option>
+        </select>
+      </label>
+      <div class="button-row">
+        <button id="intrastekSave" type="button">Save</button>
+        <button id="intrastekTest" type="button" class="secondary">Test connection</button>
+      </div>
+      <p class="hint">Test connection checks the values typed above, without saving them.</p>
+      <p id="intrastekStatus" class="status"></p>
+      <div id="intrastekMe" class="me-box" hidden></div>
+    </section>
+
+    <section>
       <h2>Factions</h2>
       <p class="hint">These are shared with every pedagogy staff member connected to the same backend.</p>
       <div id="factionList"></div>
