@@ -24,6 +24,12 @@ section {
 .hint {
   opacity: 0.65;
   font-size: 13px;
+  margin: 6px 0 12px;
+}
+
+/* Only a hint right under a section title is pulled up to it: elsewhere (under an input or the
+   buttons) a negative margin would draw the text over them. */
+h2 + .hint {
   margin-top: -8px;
 }
 
@@ -155,7 +161,9 @@ select {
 
 .button-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+  margin-bottom: 4px;
 }
 
 button.secondary {

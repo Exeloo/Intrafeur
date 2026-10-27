@@ -190,7 +190,7 @@ export const UNIT_FILTER_DEFAULT_COLUMNS: UnitFilterColumns = {
 // synced across browsers (storage.sync) nor reach the page's MAIN world.
 // No key saved = the whole feature is off (no popup toggle on purpose).
 export const INTRASTEK_API_URL_KEY = 'intrastekApiUrl';
-export const INTRASTEK_API_URL_DEFAULT = 'https://api-intrastek.epistone.fr';
+export const INTRASTEK_API_URL_DEFAULT = 'https://api.intrastek.epistone.fr';
 export const INTRASTEK_API_KEY_KEY = 'intrastekApiKey';
 // Group targeted by the planning actions; '' / missing = the user's own group.
 export const INTRASTEK_DEFAULT_GROUP_KEY = 'intrastekDefaultGroupId';
