@@ -176,8 +176,18 @@ export interface GroupView {
   // The first event when this one follows it (same intranet activity, back to
   // back): only that one can be set. From the API once the merge exists (or a
   // proposal on the first event spans this one), else guessed from the
-  // calendar (display only, the API decides).
+  // calendar (display only, the API decides), and then only when that first
+  // event is on Intrastek (activities or a pending proposal in the group).
   linkedTo: number | null;
+}
+
+function onIntrastek(eventId: number, groupId: string | null): boolean {
+  const state = cachedState(eventId);
+  if (!state) return false;
+  return (
+    state.activities.some((a) => groupId === null || a.groupId === groupId) ||
+    state.proposals.some((p) => p.status === 'PENDING' && (groupId === null || p.groupId === groupId))
+  );
 }
 
 // groupId null = all groups in the state.
@@ -194,7 +204,7 @@ export function groupView(state: IntrastekEventState, groupId: string | null): G
       ? (activities.find((a) => a.headEventId !== state.eventId)?.headEventId ?? null)
       : proposal && proposal.eventId !== state.eventId
         ? proposal.eventId
-        : guessHead(state.eventId),
+        : guessedHead(state.eventId, groupId),
   };
 }
 
@@ -203,6 +213,11 @@ export function groupView(state: IntrastekEventState, groupId: string | null): G
 // blocks on screen. The tags are forgeable: display only.
 const MERGE_GAP_MS = 15 * 60_000;
 const parisDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' });
+
+function guessedHead(eventId: number, groupId: string | null): number | null {
+  const head = guessHead(eventId);
+  return head !== null && onIntrastek(head, groupId) ? head : null;
+}
 
 function guessHead(eventId: number): number | null {
   const byId = new Map<number, { activity: string; start: number; end: number }>();
