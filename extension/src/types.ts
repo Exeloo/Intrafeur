@@ -31,6 +31,11 @@ export const EVENT_INFO_ENABLED_DEFAULT = true;
 export const UNIT_FILTERS_ENABLED_KEY = 'unitFiltersEnabled';
 export const UNIT_FILTERS_ENABLED_DEFAULT = true;
 
+// Attendance button on the student page's Absences tab — same storage.local
+// reasoning. On by default (it only calls the site's own API client).
+export const ABSENCE_STATUS_ENABLED_KEY = 'absenceStatusEnabled';
+export const ABSENCE_STATUS_ENABLED_DEFAULT = true;
+
 export type AssignmentsMap = Record<string, number>;
 
 export interface RowMeta {
@@ -225,10 +230,16 @@ export interface IntrastekActivity {
   start: string;
   end: string;
   assignedCount: number;
+  // The event this activity belongs to: another one when the event is merged
+  // into the previous one of the same intranet activity (only that one can be
+  // set; the API answers 409 on the others).
+  headEventId: number;
 }
 
 export interface IntrastekProposal {
   id: string;
+  // The event it was made on: the first one when this event is merged into it.
+  eventId: number;
   kind: IntrastekProposalKind;
   status: IntrastekProposalStatus;
   groupId: string;

@@ -1,0 +1,5 @@
+/* The site's static "Absent" badge on a student's Absences tab, replaced by
+   absence-status.ts's attendance button. Hidden, never removed: React owns it. */
+html[data-epitools-absence-status='on'] [data-epitools-absence-native] {
+  display: none !important;
+}

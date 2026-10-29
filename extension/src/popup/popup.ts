@@ -1,5 +1,7 @@
 import browser from 'webextension-polyfill';
 import {
+  ABSENCE_STATUS_ENABLED_KEY,
+  ABSENCE_STATUS_ENABLED_DEFAULT,
   FACTIONS_ENABLED_KEY,
   FACTIONS_ENABLED_DEFAULT,
   EVAL_SHEET_ENABLED_KEY,
@@ -16,17 +18,20 @@ async function init(): Promise<void> {
   const eventInfoCheckbox = document.getElementById('eventInfoEnabled') as HTMLInputElement;
   const evalCheckbox = document.getElementById('evalSheetEnabled') as HTMLInputElement;
   const unitFiltersCheckbox = document.getElementById('unitFiltersEnabled') as HTMLInputElement;
+  const absenceStatusCheckbox = document.getElementById('absenceStatusEnabled') as HTMLInputElement;
 
   const stored = await browser.storage.local.get({
     [FACTIONS_ENABLED_KEY]: FACTIONS_ENABLED_DEFAULT,
     [EVENT_INFO_ENABLED_KEY]: EVENT_INFO_ENABLED_DEFAULT,
     [EVAL_SHEET_ENABLED_KEY]: EVAL_SHEET_ENABLED_DEFAULT,
     [UNIT_FILTERS_ENABLED_KEY]: UNIT_FILTERS_ENABLED_DEFAULT,
+    [ABSENCE_STATUS_ENABLED_KEY]: ABSENCE_STATUS_ENABLED_DEFAULT,
   });
   checkbox.checked = stored[FACTIONS_ENABLED_KEY] !== false;
   eventInfoCheckbox.checked = stored[EVENT_INFO_ENABLED_KEY] !== false;
   evalCheckbox.checked = stored[EVAL_SHEET_ENABLED_KEY] === true;
   unitFiltersCheckbox.checked = stored[UNIT_FILTERS_ENABLED_KEY] !== false;
+  absenceStatusCheckbox.checked = stored[ABSENCE_STATUS_ENABLED_KEY] !== false;
 
   checkbox.addEventListener('change', () => {
     browser.storage.local.set({ [FACTIONS_ENABLED_KEY]: checkbox.checked });
@@ -38,6 +43,10 @@ async function init(): Promise<void> {
 
   unitFiltersCheckbox.addEventListener('change', () => {
     browser.storage.local.set({ [UNIT_FILTERS_ENABLED_KEY]: unitFiltersCheckbox.checked });
+  });
+
+  absenceStatusCheckbox.addEventListener('change', () => {
+    browser.storage.local.set({ [ABSENCE_STATUS_ENABLED_KEY]: absenceStatusCheckbox.checked });
   });
 
   evalCheckbox.addEventListener('change', () => {

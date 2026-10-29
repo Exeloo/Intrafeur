@@ -234,7 +234,8 @@ export function openEventPopup(mountIn: Element, event: EventInfo, me: Intrastek
       stateBox.appendChild(line);
       for (const p of state.proposals.filter((x) => x.groupId === gid && x.status === 'PENDING')) {
         const pl = el('div', 'epitools-ik-proposal');
-        pl.textContent = `⏳ Pending ${p.kind}: ${proposalSummary(p)}, by ${personName(p.proposedBy)}${p.mine ? ' (yours)' : ''}`;
+        const on = p.eventId !== state.eventId ? ` (on the first event, ${p.eventId})` : '';
+        pl.textContent = `⏳ Pending ${p.kind}${on}: ${proposalSummary(p)}, by ${personName(p.proposedBy)}${p.mine ? ' (yours)' : ''}`;
         stateBox.appendChild(pl);
       }
     }
@@ -280,7 +281,10 @@ export function openEventPopup(mountIn: Element, event: EventInfo, me: Intrastek
     const writeButtons: HTMLButtonElement[] = [];
     let note = '';
 
-    if (gid && view) {
+    aersInput.disabled = !!view && view.linkedTo !== null;
+    if (gid && view && view.linkedTo !== null) {
+      note = `This event follows event ${view.linkedTo} of the same activity: set the AERs needed on that one.`;
+    } else if (gid && view) {
       if (me.isAdmin) {
         const apply = button('Apply', 'epitools-modal-primary');
         apply.addEventListener('click', () => {
@@ -633,6 +637,22 @@ export function openBlockMenu(opts: {
     }
 
     const submitLabel = me.isAdmin ? 'Apply' : proposal?.mine ? 'Update my proposal' : 'Propose';
+    const head = view.linkedTo;
+    if (head !== null) {
+      menu.appendChild(el('div', 'epitools-ik-menu-note', `🔗 Part of event ${head} (first): set it there.`));
+      item('Edit AERs needed on the first event…', blocked ? null : () =>
+        openAersPrompt({
+          event: { ...event, id: head },
+          me,
+          groupId: gid,
+          initial: prefillAers(view),
+          submitLabel,
+          onSubmit: (g, n) => void doWrite(() => api.set(head, g, n)),
+        }),
+      );
+      item('Open details', opts.onOpenDetails);
+      return;
+    }
     item(view.initialized ? 'Edit AERs needed…' : 'Init…', blocked ? null : () =>
       openAersPrompt({
         event,

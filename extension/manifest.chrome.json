@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Intrafeur",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "A toolbox of features that make the Epitech intranet easier to use.",
   "icons": {
     "16": "icons/icon16.png",
@@ -24,8 +24,8 @@
     },
     {
       "matches": ["https://my.epitech.eu/*"],
-      "js": ["content/event-info.js", "content/eval-sheet-page.js", "content/intrastek-page.js"],
-      "css": ["content/event-info.css", "content/eval-sheet.css"],
+      "js": ["content/event-info.js", "content/eval-sheet-page.js", "content/intrastek-page.js", "content/absence-status.js"],
+      "css": ["content/event-info.css", "content/eval-sheet.css", "content/absence-status.css"],
       "run_at": "document_idle",
       "world": "MAIN"
     }

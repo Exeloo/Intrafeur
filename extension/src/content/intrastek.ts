@@ -59,7 +59,7 @@ const BADGE_CLASS = 'epitools-ik-badge';
 const SIG_ATTR = 'data-epitools-ik-sig';
 const POS_ATTR = 'data-epitools-ik-pos';
 const LEGEND_SIG_ATTR = 'data-epitools-ik-legend';
-const BLOCK_CLASSES = ['epitools-ik-initialized', 'epitools-ik-proposed', 'epitools-ik-none'];
+const BLOCK_CLASSES = ['epitools-ik-initialized', 'epitools-ik-proposed', 'epitools-ik-none', 'epitools-ik-linked'];
 const BLOCK_SELECTOR = '.scheduler-event';
 // Fallback only (the button is found by shape first); EN + FR (FR unverified).
 const PLANNING_MODE_LABEL = /planning mode|mode planning|mode planification/i;
@@ -317,6 +317,11 @@ function blockDecoration(id: number): { cls: string; badge: string } {
   if (!state) return { cls: '', badge: '' };
   const view = groupView(state, currentTarget());
   const count = view.nbUserAsk !== null && view.nbUserAsk > 0 ? String(view.nbUserAsk) : '?';
+  // Merged into the previous event: its count, set there.
+  if (view.linkedTo !== null) {
+    const badge = view.initialized ? `🔗 👥 ${count}` : view.proposal ? '🔗 ⏳' : '🔗';
+    return { cls: 'epitools-ik-linked', badge };
+  }
   if (view.proposal) {
     return { cls: 'epitools-ik-proposed', badge: view.initialized ? `⏳ 👥 ${count}` : '⏳' };
   }
@@ -480,6 +485,7 @@ function syncLegend(modeButton: HTMLElement | null): void {
     swatch('epitools-ik-swatch--initialized', 'initialized (👥 AERs needed)'),
     swatch('epitools-ik-swatch--proposed', '⏳ proposal pending'),
     swatch('epitools-ik-swatch--none', 'not initialized'),
+    swatch('epitools-ik-swatch--linked', '🔗 follows the previous event (set it there)'),
     document.createTextNode('Right-click a block for actions.'),
   );
   if (error) {
