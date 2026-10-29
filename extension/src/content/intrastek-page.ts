@@ -13,13 +13,15 @@ const ID_ATTR = 'data-epitools-event-id';
 const TITLE_ATTR = 'data-epitools-event-title';
 const START_ATTR = 'data-epitools-event-start';
 const END_ATTR = 'data-epitools-event-end';
-const ATTRS = [ID_ATTR, TITLE_ATTR, START_ATTR, END_ATTR];
+const ACTIVITY_ATTR = 'data-epitools-event-activity';
+const ATTRS = [ID_ATTR, TITLE_ATTR, START_ATTR, END_ATTR, ACTIVITY_ATTR];
 
 interface Tag {
   id: string;
   title: string | null;
   start: string | null;
   end: string | null;
+  activity: string | null;
 }
 
 function isEnabled(): boolean {
@@ -45,6 +47,7 @@ function applyTag(el: Element, tag: Tag | null): void {
   setAttr(el, TITLE_ATTR, tag.title ? tag.title.slice(0, 300) : null);
   setAttr(el, START_ATTR, tag.start);
   setAttr(el, END_ATTR, tag.end);
+  setAttr(el, ACTIVITY_ATTR, tag.activity && /^\d+$/.test(tag.activity) ? tag.activity : null);
 }
 
 function clearAll(): void {
@@ -65,7 +68,13 @@ function check(): void {
     const event = extractSchedulerEvent(block);
     applyTag(
       block,
-      event && { id: event.id, title: event.fullTitle, start: event.startDate, end: event.endDate },
+      event && {
+        id: event.id,
+        title: event.fullTitle,
+        start: event.startDate,
+        end: event.endDate,
+        activity: event.activityInstanceId,
+      },
     );
   }
 
@@ -81,6 +90,7 @@ function check(): void {
         title: event.fullTitle || event.activityName || null,
         start: event.startDate || null,
         end: event.endDate || null,
+        activity: event.activityInstanceId != null ? String(event.activityInstanceId) : null,
       },
     );
   }

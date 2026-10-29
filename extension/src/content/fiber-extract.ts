@@ -126,11 +126,20 @@ export interface CachedQuery {
 // Slice of the site's generated API client (bearer auth handled inside).
 // getAvatar resolves to the full photo as a Blob (240x240 JPEG, verified
 // live), getAvatarThumbnail to a 96x96 data: URL; both reject or resolve to
-// null when the student has no photo.
+// null when the student has no photo. events.setAttendance is what the
+// planning modal's Attendance menu calls (POST /events/:id/attendance/set).
+export type AttendanceStatus = 'present' | 'absent' | 'justified';
+
 export interface ApiClientLike {
   unlabeled: {
     getAvatar: (login: string) => Promise<unknown>;
     getAvatarThumbnail: (login: string) => Promise<unknown>;
+  };
+  events?: {
+    setAttendance?: (
+      eventId: number,
+      dto: { records: { login: string; status: AttendanceStatus }[] },
+    ) => Promise<void>;
   };
 }
 
@@ -263,6 +272,9 @@ export interface SchedulerEvent {
   endDate: string | null;
   unitCode: string | null;
   rooms: { name?: string | null }[] | null;
+  // Intranet activity of the event: back-to-back events of one activity are
+  // merged into one Intrastek activity.
+  activityInstanceId: string | null;
 }
 
 interface SchedulerFiberNode {
@@ -305,8 +317,51 @@ export function extractSchedulerEvent(el: Element, maxDepth = 5): SchedulerEvent
       startDate: asIso(ext.startDate) ?? asIso(event.start),
       endDate: asIso(ext.endDate) ?? asIso(event.end),
       unitCode: asString(ext.unitCode),
+      activityInstanceId: asString(ext.activityInstanceId),
       rooms: Array.isArray(ext.rooms) ? (ext.rooms as { name?: string | null }[]) : null,
     };
+  }
+  return null;
+}
+
+// --- Student page "Absences" tab (MAIN world only, same reason as above) ---
+
+// Verified live on /students/<login>#absences ("By activities" view): each
+// absence is a Card whose wrapper component (5 fibers above the
+// .mantine-Card-root, the one with an `accentBorderSide` prop) is keyed
+// `${eventId}-${startDate}`, and the list component above it has the
+// student's `login` prop. The list only contains `absent` records (justified
+// ones are left out), and its records carry no status field.
+export interface AbsenceCard {
+  eventId: number;
+  startDate: string;
+  login: string;
+}
+
+interface KeyedFiberNode {
+  key?: string | null;
+  memoizedProps?: Record<string, unknown> | null;
+  return?: KeyedFiberNode | null;
+}
+
+const ABSENCE_KEY = /^(\d+)-(\d{4}-\d\d-\d\dT\S+)$/;
+
+export function extractAbsenceCard(card: Element, maxDepth = 25): AbsenceCard | null {
+  const fiberKey = findFiberKey(card);
+  if (!fiberKey) return null;
+  let fiber: KeyedFiberNode | null | undefined = (card as unknown as Record<string, KeyedFiberNode>)[fiberKey];
+  let match: RegExpExecArray | null = null;
+  for (let depth = 0; fiber && depth <= maxDepth; depth++, fiber = fiber.return) {
+    const props = fiber.memoizedProps;
+    if (!match) {
+      if (props && 'accentBorderSide' in props && fiber.key) match = ABSENCE_KEY.exec(fiber.key);
+      continue;
+    }
+    const login = props?.login;
+    if (typeof login === 'string' && login) {
+      const eventId = Number(match[1]);
+      return Number.isSafeInteger(eventId) && eventId > 0 ? { eventId, startDate: match[2], login } : null;
+    }
   }
   return null;
 }

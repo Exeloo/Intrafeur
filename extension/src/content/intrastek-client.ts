@@ -20,6 +20,7 @@ export const EVENT_ID_ATTR = 'data-epitools-event-id';
 export const EVENT_TITLE_ATTR = 'data-epitools-event-title';
 export const EVENT_START_ATTR = 'data-epitools-event-start';
 export const EVENT_END_ATTR = 'data-epitools-event-end';
+export const EVENT_ACTIVITY_ATTR = 'data-epitools-event-activity';
 
 export class IntrastekError extends Error {
   constructor(
@@ -169,9 +170,14 @@ export interface GroupView {
   activities: IntrastekActivity[];
   proposal: IntrastekProposal | null;
   initialized: boolean;
-  // Max over the group's activities (a lunch-split event has two rows,
-  // normally with the same value); null when not initialized.
+  // Max over the group's activities (an event split at its slots' pause has
+  // two rows, normally with the same value); null when not initialized.
   nbUserAsk: number | null;
+  // The first event when this one follows it (same intranet activity, back to
+  // back): only that one can be set. From the API once the merge exists (or a
+  // proposal on the first event spans this one), else guessed from the
+  // calendar (display only, the API decides).
+  linkedTo: number | null;
 }
 
 // groupId null = all groups in the state.
@@ -184,7 +190,43 @@ export function groupView(state: IntrastekEventState, groupId: string | null): G
     proposal,
     initialized: activities.length > 0,
     nbUserAsk: activities.length ? Math.max(...activities.map((a) => a.nbUserAsk)) : null,
+    linkedTo: activities.length
+      ? (activities.find((a) => a.headEventId !== state.eventId)?.headEventId ?? null)
+      : proposal && proposal.eventId !== state.eventId
+        ? proposal.eventId
+        : guessHead(state.eventId),
   };
+}
+
+// Same rule as the API (back-to-back = next start at most 15 min after the
+// end so far, same Paris day, same intranet activity), over the tagged
+// blocks on screen. The tags are forgeable: display only.
+const MERGE_GAP_MS = 15 * 60_000;
+const parisDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' });
+
+function guessHead(eventId: number): number | null {
+  const byId = new Map<number, { activity: string; start: number; end: number }>();
+  for (const el of Array.from(document.querySelectorAll(`[${EVENT_ID_ATTR}][${EVENT_ACTIVITY_ATTR}]`))) {
+    const id = parseEventId(el.getAttribute(EVENT_ID_ATTR));
+    const activity = el.getAttribute(EVENT_ACTIVITY_ATTR);
+    const start = Date.parse(el.getAttribute(EVENT_START_ATTR) ?? '');
+    const end = Date.parse(el.getAttribute(EVENT_END_ATTR) ?? '');
+    if (id && activity && Number.isFinite(start) && Number.isFinite(end)) byId.set(id, { activity, start, end });
+  }
+  const self = byId.get(eventId);
+  if (!self) return null;
+  const day = parisDay.format(self.start);
+  const same = Array.from(byId, ([id, e]) => ({ id, ...e }))
+    .filter((e) => e.activity === self.activity && parisDay.format(e.start) === day)
+    .sort((a, b) => a.start - b.start || a.id - b.id);
+  let head = same[0];
+  let end = -Infinity;
+  for (const e of same) {
+    if (e.start > end + MERGE_GAP_MS) head = e;
+    end = Math.max(end, e.end);
+    if (e.id === eventId) return head && head.id !== eventId ? head.id : null;
+  }
+  return null;
 }
 
 // Group the planning actions target: the configured default when the key

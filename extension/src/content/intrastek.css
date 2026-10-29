@@ -268,6 +268,12 @@
   opacity: 0.45;
 }
 
+/* Merged into the previous event of the same intranet activity. */
+.scheduler-event.epitools-ik-linked {
+  outline: 2px dotted #2fb344 !important;
+  outline-offset: -2px;
+}
+
 .epitools-ik-badge {
   position: absolute;
   top: 2px;
@@ -345,6 +351,10 @@
 .epitools-ik-swatch--none {
   background: #868e96;
   opacity: 0.45;
+}
+
+.epitools-ik-swatch--linked {
+  border: 2px dotted #2fb344;
 }
 
 .epitools-ik-legend-error {
