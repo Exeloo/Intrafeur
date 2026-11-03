@@ -1,0 +1,4 @@
+/* UE "Grade: X" badges on the Competencies tab, hidden by hide-grades.ts's toggle. */
+html[data-epitools-grades-hidden='on'] [data-epitools-grade] {
+  display: none !important;
+}

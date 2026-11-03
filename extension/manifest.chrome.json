@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Intrafeur",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "description": "A toolbox of features that make the Epitech intranet easier to use.",
   "icons": {
     "16": "icons/icon16.png",
@@ -18,14 +18,14 @@
   "content_scripts": [
     {
       "matches": ["https://my.epitech.eu/*"],
-      "js": ["content/attendance.js", "content/unit-filters.js", "content/eval-sheet.js", "content/event-info-toggle.js", "content/intrastek.js"],
-      "css": ["content/attendance.css", "content/unit-filters.css", "content/intrastek.css"],
+      "js": ["content/attendance.js", "content/unit-filters.js", "content/eval-sheet.js", "content/event-info-toggle.js", "content/intrastek.js", "content/hide-grades.js"],
+      "css": ["content/attendance.css", "content/unit-filters.css", "content/intrastek.css", "content/hide-grades.css"],
       "run_at": "document_idle"
     },
     {
       "matches": ["https://my.epitech.eu/*"],
-      "js": ["content/event-info.js", "content/eval-sheet-page.js", "content/intrastek-page.js", "content/absence-status.js"],
-      "css": ["content/event-info.css", "content/eval-sheet.css", "content/absence-status.css"],
+      "js": ["content/event-info.js", "content/eval-sheet-page.js", "content/intrastek-page.js", "content/absence-status.js", "content/student-units.js"],
+      "css": ["content/event-info.css", "content/eval-sheet.css", "content/absence-status.css", "content/student-units.css"],
       "run_at": "document_idle",
       "world": "MAIN"
     }

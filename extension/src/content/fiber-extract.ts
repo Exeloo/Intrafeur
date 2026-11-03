@@ -141,6 +141,36 @@ export interface ApiClientLike {
       dto: { records: { login: string; status: AttendanceStatus }[] },
     ) => Promise<void>;
   };
+  // GET /units/instances and GET /units/:year/:code/:instance/registrations
+  // (the actual registrations; /students lists every eligible student).
+  units?: {
+    getAllUnitInstances?: (schoolYear: number, expanded?: boolean) => Promise<{ data?: UnitInstance[] }>;
+    getRegistrations?: (
+      schoolYear: number,
+      unitCode: string,
+      instanceCode: string,
+    ) => Promise<{ student?: UnitStudent | null }[]>;
+  };
+}
+
+// Fields of a /units/instances item used by student-units.ts (verified live).
+export interface UnitInstance {
+  schoolYear: number;
+  code: string;
+  unitCode: string;
+  name?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  registrationsCount?: number | null;
+  semesters?: { id?: number | null }[] | null;
+  campuses?: { code?: string | null }[] | null;
+}
+
+// A GET /units/:year/:code/:instance/registrations row's `student` (verified live).
+export interface UnitStudent {
+  login?: string;
+  campus?: { code?: string | null } | null;
+  semester?: { id?: number | null; num?: number | null; cursus?: { code?: string | null } | null } | null;
 }
 
 export interface QueryClientLike {

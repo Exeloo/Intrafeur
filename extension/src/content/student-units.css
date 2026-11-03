@@ -1,0 +1,57 @@
+/* Student page "Units" tab (student-units.ts). While it's open the site's tab
+   content is hidden (never removed: React owns it), the native active tab and
+   its sliding indicator look inactive, and our tab looks active. The panel
+   itself reuses the site's Mantine classes; only layout glue lives here. */
+html[data-epitools-units-open] [data-epitools-units-hidden] {
+  display: none !important;
+}
+html[data-epitools-units-open] :has(> [data-epitools-units-tab]) > button[aria-current] {
+  color: var(--mantine-color-dimmed) !important;
+}
+html[data-epitools-units-open] :has(> [data-epitools-units-tab]) > div:first-child {
+  display: none !important;
+}
+html[data-epitools-units-open] [data-epitools-units-tab] {
+  color: var(--mantine-color-text) !important;
+  background: var(--mantine-color-default-hover) !important;
+  border-bottom-color: var(--mantine-color-blue-6) !important;
+}
+
+.epitools-units-panel {
+  animation: 0.25s ease-out 0s 1 normal both running revealUp;
+}
+.epitools-units-header,
+.epitools-units-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--mantine-spacing-md);
+}
+.epitools-units-section-header {
+  justify-content: flex-start;
+}
+.epitools-units-header h2,
+.epitools-units-section-header h4 {
+  margin: 0;
+}
+.epitools-units-year {
+  width: 9rem;
+}
+.epitools-units-year select {
+  border-radius: 0;
+  cursor: pointer;
+}
+.epitools-units-paper {
+  overflow-x: auto;
+}
+.epitools-units-table td:not(:nth-child(2)),
+.epitools-units-table th {
+  white-space: nowrap;
+}
+.epitools-units-table td:nth-child(2) {
+  width: 100%;
+}
+/* Mantine badges shrink and truncate; keep the full unit code. */
+.epitools-units-table .mantine-Badge-root {
+  min-width: max-content;
+}

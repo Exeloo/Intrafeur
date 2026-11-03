@@ -36,6 +36,9 @@ export const UNIT_FILTERS_ENABLED_DEFAULT = true;
 export const ABSENCE_STATUS_ENABLED_KEY = 'absenceStatusEnabled';
 export const ABSENCE_STATUS_ENABLED_DEFAULT = true;
 
+// Competencies tab "Hide grades" toggle (storage.local), off by default.
+export const GRADES_HIDDEN_KEY = 'gradesHidden';
+
 export type AssignmentsMap = Record<string, number>;
 
 export interface RowMeta {
