@@ -3,6 +3,9 @@
 // "Absent" badge with the same badge-button + menu (Mark present / Mark
 // absent / Justify absence) as the planning event modal's Attendance column,
 // and calls the same site API (events.setAttendance) with the same payload.
+// Graded activities (activityInstance.gradingScaleId, or an evaluationType
+// other than no_evaluation, read via events.getById) get a locked button.
+// Each card also gets the project page's "View on planning" icon link.
 //
 // Runs in the page's MAIN world: the absence's event id and the student's
 // login only exist in React fibers (see extractAbsenceCard), and the API is
@@ -28,6 +31,7 @@ import {
 const BUTTON_ATTR = 'data-epitools-absence-btn';
 const NATIVE_ATTR = 'data-epitools-absence-native';
 const MENU_ATTR = 'data-epitools-absence-menu';
+const PLANNING_ATTR = 'data-epitools-absence-planning';
 const ERROR_MS = 2500;
 
 interface StatusOption {
@@ -85,6 +89,52 @@ const OPTIONS: StatusOption[] = [
 // marked-present absence stays visible (and can be reverted) until reload.
 const statuses = new Map<string, AttendanceStatus>();
 const pending = new Set<string>();
+
+// Graded activities (defenses, reviews…) keep their attendance read-only
+// here. eventId -> graded, 'error' when the event couldn't be read; missing
+// while loading. Both unknown states lock the button (fail closed).
+const graded = new Map<number, boolean | 'error'>();
+const gradedLoading = new Set<number>();
+
+function loadGraded(api: ApiClientLike, eventId: number): void {
+  if (graded.has(eventId) || gradedLoading.has(eventId)) return;
+  const getById = api.events?.getById;
+  if (typeof getById !== 'function') {
+    graded.set(eventId, 'error');
+    return;
+  }
+  gradedLoading.add(eventId);
+  getById
+    .call(api.events, eventId)
+    .then(
+      (event) => {
+        const activity = event?.activityInstance;
+        const evaluation = activity?.metadata?.evaluationType;
+        graded.set(
+          eventId,
+          !activity ? 'error' : activity.gradingScaleId != null || (!!evaluation && evaluation !== 'no_evaluation'),
+        );
+      },
+      () => graded.set(eventId, 'error'),
+    )
+    .finally(() => {
+      gradedLoading.delete(eventId);
+      scheduleCheck();
+    });
+}
+
+function eventIdOf(key: string): number {
+  return Number(key.split('|')[1]);
+}
+
+// Why the button is locked, '' when it isn't.
+function lockReason(key: string): string {
+  const state = graded.get(eventIdOf(key));
+  if (state === false) return '';
+  if (state === true) return 'Graded activity: attendance cannot be changed here';
+  if (state === 'error') return 'Could not check whether this activity is graded';
+  return 'Checking whether this activity is graded…';
+}
 
 function cardKey(card: AbsenceCard): string {
   return `${card.login}|${card.eventId}|${card.startDate}`;
@@ -154,6 +204,7 @@ function buildButton(key: string, nativeLabel: string): HTMLButtonElement {
   button.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
+    if (button.getAttribute('aria-disabled') === 'true') return;
     if (button.getAttribute('aria-expanded') === 'true') closeMenu();
     else openMenu(button);
   });
@@ -170,11 +221,81 @@ function renderButton(button: HTMLButtonElement): void {
   const label = status === 'absent' ? button.dataset.epitoolsNativeLabel || option.label : option.label;
   const badge = button.firstElementChild as HTMLElement;
   const busy = pending.has(key);
-  if (button.dataset.epitoolsRendered === `${status}|${busy}`) return;
-  button.dataset.epitoolsRendered = `${status}|${busy}`;
+  const lock = lockReason(key);
+  if (button.dataset.epitoolsRendered === `${status}|${busy}|${lock}`) return;
+  button.dataset.epitoolsRendered = `${status}|${busy}|${lock}`;
   styleBadge(badge, option, label);
   button.disabled = busy;
-  button.style.opacity = busy ? '0.6' : '';
+  // aria-disabled, not disabled: a disabled button shows no title tooltip in every browser.
+  if (lock) {
+    button.setAttribute('aria-disabled', 'true');
+    button.title = lock;
+    badge.style.cursor = 'not-allowed';
+  } else {
+    button.removeAttribute('aria-disabled');
+    button.removeAttribute('title');
+  }
+  button.style.opacity = busy || lock ? '0.6' : '';
+}
+
+// --- "View on planning" link (copy of the project page's timeline icon) ---
+
+function ymd(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// Same URL as the project page: the event's Monday–Sunday week + eventId (opens the modal).
+function planningUrl(absence: AbsenceCard): string {
+  const d = new Date(absence.startDate);
+  const monday = new Date(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7));
+  const sunday = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 6);
+  return `/planning?start=${ymd(monday)}&end=${ymd(sunday)}&eventId=${absence.eventId}`;
+}
+
+const CALENDAR_SEARCH_PATHS = [
+  'M11.5 21h-5.5a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v4.5',
+  'M16 3v4',
+  'M8 3v4',
+  'M4 11h16',
+  'M15 18a3 3 0 1 0 6 0a3 3 0 1 0 -6 0',
+  'M20.2 20.2l1.8 1.8',
+];
+
+function buildPlanningLink(key: string, absence: AbsenceCard): HTMLAnchorElement {
+  const link = document.createElement('a');
+  link.className =
+    'mantine-focus-auto mantine-active m_8d3f4000 mantine-ActionIcon-root m_87cf2631 mantine-UnstyledButton-root';
+  link.dataset.variant = 'subtle';
+  link.setAttribute(PLANNING_ATTR, key);
+  link.setAttribute('aria-label', 'View on planning');
+  link.title = 'View on planning';
+  link.href = planningUrl(absence);
+  link.setAttribute(
+    'style',
+    '--ai-size: calc(1.125rem * var(--mantine-scale)); --ai-bg: transparent; ' +
+      '--ai-hover: var(--mantine-color-gray-light-hover); --ai-color: var(--mantine-color-gray-light-color); ' +
+      '--ai-bd: calc(0.0625rem * var(--mantine-scale)) solid transparent;',
+  );
+  const span = document.createElement('span');
+  span.className = 'm_8d3afb97 mantine-ActionIcon-icon';
+  span.appendChild(svgIcon('currentColor', 'calendar-search', CALENDAR_SEARCH_PATHS));
+  link.appendChild(span);
+
+  link.addEventListener('click', (e) => {
+    if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return; // new tab: native href
+    e.preventDefault();
+    e.stopPropagation();
+    // Client-side navigation like the site's own <Link>: push a React Router
+    // shaped history entry, then let the router pick it up via popstate.
+    const idx = (history.state as { idx?: unknown } | null)?.idx;
+    history.pushState(
+      { usr: null, key: Math.random().toString(36).slice(2, 10), idx: typeof idx === 'number' ? idx + 1 : 0 },
+      '',
+      link.href,
+    );
+    window.dispatchEvent(new PopStateEvent('popstate', { state: history.state }));
+  });
+  return link;
 }
 
 function flashError(button: HTMLButtonElement, message: string): void {
@@ -199,22 +320,26 @@ let openMenuEl: HTMLElement | null = null;
 let openMenuButton: HTMLButtonElement | null = null;
 
 function icon(option: StatusOption): SVGSVGElement {
+  return svgIcon(`var(--mantine-color-${option.color}-6)`, option.icon, option.paths);
+}
+
+function svgIcon(stroke: string, name: string, paths: string[]): SVGSVGElement {
   const ns = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(ns, 'svg');
-  for (const [name, value] of Object.entries({
+  for (const [attr, value] of Object.entries({
     width: '16',
     height: '16',
     viewBox: '0 0 24 24',
     fill: 'none',
-    stroke: `var(--mantine-color-${option.color}-6)`,
+    stroke,
     'stroke-width': '2',
     'stroke-linecap': 'round',
     'stroke-linejoin': 'round',
-    class: `tabler-icon tabler-icon-${option.icon}`,
+    class: `tabler-icon tabler-icon-${name}`,
   })) {
-    svg.setAttribute(name, value);
+    svg.setAttribute(attr, value);
   }
-  for (const d of option.paths) {
+  for (const d of paths) {
     const path = document.createElementNS(ns, 'path');
     path.setAttribute('d', d);
     svg.appendChild(path);
@@ -338,7 +463,7 @@ async function setStatus(button: HTMLButtonElement, status: AttendanceStatus): P
     flashError(button, 'Could not read this absence from the page');
     return;
   }
-  if (pending.has(key) || (statuses.get(key) ?? 'absent') === status) return;
+  if (lockReason(key) || pending.has(key) || (statuses.get(key) ?? 'absent') === status) return;
 
   pending.add(key);
   renderButton(button);
@@ -359,7 +484,7 @@ async function setStatus(button: HTMLButtonElement, status: AttendanceStatus): P
 
 function removeAll(): void {
   closeMenu();
-  document.querySelectorAll(`[${BUTTON_ATTR}]`).forEach((b) => b.remove());
+  document.querySelectorAll(`[${BUTTON_ATTR}], [${PLANNING_ATTR}]`).forEach((b) => b.remove());
   document.querySelectorAll(`[${NATIVE_ATTR}]`).forEach((b) => b.removeAttribute(NATIVE_ATTR));
 }
 
@@ -375,7 +500,7 @@ function check(): void {
   // Drop our menu if its button was unmounted (page change, tab switch).
   if (openMenuButton && !openMenuButton.isConnected) closeMenu();
 
-  let apiChecked: boolean | null = null;
+  let api: ApiClientLike | null | undefined;
   let qc: QueryClientLike | null | undefined;
   for (const card of Array.from(document.querySelectorAll('.mantine-Card-root'))) {
     let absence = extractAbsenceCard(card);
@@ -384,8 +509,9 @@ function check(): void {
       if (!isListedAbsence(qc, absence)) absence = null;
     }
     const existing = card.querySelector<HTMLButtonElement>(`[${BUTTON_ATTR}]`);
+    const removeExisting = () => card.querySelectorAll(`[${BUTTON_ATTR}], [${PLANNING_ATTR}]`).forEach((e) => e.remove());
     if (!absence) {
-      existing?.remove();
+      removeExisting();
       continue;
     }
     const key = cardKey(absence);
@@ -394,16 +520,17 @@ function check(): void {
       renderButton(existing);
       continue;
     }
-    existing?.remove();
+    removeExisting();
 
     const native = card.querySelector<HTMLElement>(`.mantine-Badge-root:not([${BUTTON_ATTR}] *)`);
     if (!native?.parentElement) continue;
-    if (apiChecked === null) apiChecked = hasSetAttendance(findApiClient(card));
-    if (!apiChecked) return;
+    if (api === undefined) api = findApiClient(card);
+    if (!api || !hasSetAttendance(api)) return;
 
     native.setAttribute(NATIVE_ATTR, '');
     const button = buildButton(key, native.textContent?.trim() ?? '');
-    native.after(button);
+    native.after(button, buildPlanningLink(key, absence));
+    loadGraded(api, absence.eventId);
     renderButton(button);
   }
 }

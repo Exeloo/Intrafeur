@@ -50,27 +50,43 @@ function requireReleaseToken(req: Request, res: Response, next: NextFunction): v
   next();
 }
 
-const router = express.Router();
-
-router.get('/updates.json', (req: Request, res: Response) => {
-  const updates = fs
+// Stored releases, oldest first.
+function listReleases(): { file: string; match: RegExpExecArray }[] {
+  return fs
     .readdirSync(RELEASES_DIR)
     .map((file) => ({ file, match: FILE_RE.exec(file) }))
     .filter((e): e is { file: string; match: RegExpExecArray } => e.match !== null)
-    .sort((a, b) => compareVersions(a.match[1], b.match[1]))
-    .map(({ file, match }) => {
-      const hash = crypto
-        .createHash('sha256')
-        .update(fs.readFileSync(path.join(RELEASES_DIR, file)))
-        .digest('hex');
-      return {
-        version: match[1],
-        update_link: `${baseUrl(req)}/extension/${file}`,
-        update_hash: `sha256:${hash}`,
-      };
-    });
+    .sort((a, b) => compareVersions(a.match[1], b.match[1]));
+}
+
+const router = express.Router();
+
+router.get('/updates.json', (req: Request, res: Response) => {
+  const updates = listReleases().map(({ file, match }) => {
+    const hash = crypto
+      .createHash('sha256')
+      .update(fs.readFileSync(path.join(RELEASES_DIR, file)))
+      .digest('hex');
+    return {
+      version: match[1],
+      update_link: `${baseUrl(req)}/extension/${file}`,
+      update_hash: `sha256:${hash}`,
+    };
+  });
   res.set('Cache-Control', 'no-cache');
   res.json({ addons: { [ADDON_ID]: { updates } } });
+});
+
+// Stable install link for the newest signed XPI: redirects to the versioned
+// file (Firefox prompts to install it), so the download keeps a versioned name.
+router.get('/latest', (req: Request, res: Response) => {
+  const latest = listReleases().at(-1);
+  if (!latest) {
+    res.status(404).json({ error: 'no release yet' });
+    return;
+  }
+  res.set('Cache-Control', 'no-cache');
+  res.redirect(302, `${baseUrl(req)}/extension/${latest.file}`);
 });
 
 router.get('/:file', (req: Request, res: Response) => {

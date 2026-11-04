@@ -140,6 +140,11 @@ export interface ApiClientLike {
       eventId: number,
       dto: { records: { login: string; status: AttendanceStatus }[] },
     ) => Promise<void>;
+    // GET /events/:id; a graded activity has a gradingScaleId (what the
+    // project page's "View grading scale" button keys on).
+    getById?: (eventId: number) => Promise<{
+      activityInstance?: { gradingScaleId?: number | null; metadata?: { evaluationType?: string } | null } | null;
+    }>;
   };
   // GET /units/instances and GET /units/:year/:code/:instance/registrations
   // (the actual registrations; /students lists every eligible student).
