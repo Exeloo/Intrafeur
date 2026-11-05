@@ -218,6 +218,16 @@ function removeModalButtons(): void {
 const CALENDAR_SELECTOR = '.scheduler-calendar';
 
 function findPlanningModeButton(): HTMLButtonElement | null {
+  // Current UI (verified live 2026-11): an icon-only ActionIcon whose tabler
+  // icon is `calendar-cog`, label only in aria-label.
+  const byIcon = Array.from(document.querySelectorAll('svg.tabler-icon-calendar-cog'))
+    .map((svg) => svg.closest<HTMLButtonElement>(`button:not([${MODE_BUTTON_ATTR}])`))
+    .find((b) => !!b && !b.closest(`[role=dialog], ${CALENDAR_SELECTOR}`));
+  if (byIcon) return byIcon;
+  const labelled = Array.from(
+    document.querySelectorAll<HTMLButtonElement>(`button[aria-label]:not([${MODE_BUTTON_ATTR}])`),
+  ).find((b) => PLANNING_MODE_LABEL.test(b.getAttribute('aria-label') || '') && !b.closest(`[role=dialog], ${CALENDAR_SELECTOR}`));
+  if (labelled) return labelled;
   const candidates = Array.from(
     document.querySelectorAll<HTMLButtonElement>(`button[data-with-left-section]:not([${MODE_BUTTON_ATTR}])`),
   ).filter((b) => !b.closest(`[role=dialog], ${CALENDAR_SELECTOR}`));
@@ -253,7 +263,19 @@ function buildModeButton(site: HTMLButtonElement): HTMLButtonElement {
 
   const label = btn.querySelector('.mantine-Button-label') ?? btn;
   const leftSection = btn.querySelector('[data-position="left"]');
-  if (leftSection) {
+  const iconOnly = btn.querySelector('.mantine-ActionIcon-icon');
+  if (iconOnly) {
+    // Icon-only ActionIcon: swap the icon, keep the size, label via aria.
+    const siteSvg = iconOnly.querySelector('svg');
+    const icon = buildIconSvg(MODE_ICON_PATHS);
+    const size = siteSvg?.getAttribute('width');
+    if (size) {
+      icon.setAttribute('width', size);
+      icon.setAttribute('height', siteSvg?.getAttribute('height') || size);
+    }
+    iconOnly.replaceChildren(icon);
+    btn.setAttribute('aria-label', 'Intrastek mode');
+  } else if (leftSection) {
     const siteSvg = leftSection.querySelector('svg');
     const icon = buildIconSvg(MODE_ICON_PATHS);
     const size = siteSvg?.getAttribute('width');
@@ -263,7 +285,9 @@ function buildModeButton(site: HTMLButtonElement): HTMLButtonElement {
     }
     leftSection.replaceChildren(icon);
   }
-  if (label === btn) {
+  if (iconOnly) {
+    // Nothing to relabel: the tooltip is the title set in syncModeButton.
+  } else if (label === btn) {
     // No label span: keep the icon section, replace the rest.
     for (const child of Array.from(btn.childNodes)) if (child !== leftSection) child.remove();
     btn.appendChild(document.createTextNode('Intrastek mode'));
@@ -458,9 +482,13 @@ function syncGroupSelect(select: HTMLSelectElement): void {
 function syncLegend(modeButton: HTMLElement | null): void {
   let legend = document.querySelector<HTMLElement>(`.${LEGEND_CLASS}`);
   if (!legend) {
-    // Under the toolbar row that holds the header Group, else above the
-    // calendar.
-    const row = modeButton?.parentElement?.parentElement;
+    // Under the toolbar row (the outermost Mantine Group around the mode
+    // button; the button now sits in nested Groups inside a flex row), else
+    // above the calendar.
+    let row: Element | null = null;
+    for (let el = modeButton?.parentElement; el && el !== document.body; el = el.parentElement) {
+      if (el.classList.contains('mantine-Group-root')) row = el;
+    }
     const calendar = document.querySelector(CALENDAR_SELECTOR);
     if (!row && !calendar) return;
     legend = document.createElement('div');

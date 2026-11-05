@@ -7,6 +7,9 @@ html[data-epitools-units-open] [data-epitools-units-hidden] {
 }
 html[data-epitools-units-open] :has(> [data-epitools-units-tab]) > button[aria-current] {
   color: var(--mantine-color-dimmed) !important;
+  /* The active tab is marked by an inline border-bottom + background. */
+  border-bottom-color: transparent !important;
+  background: none !important;
 }
 html[data-epitools-units-open] :has(> [data-epitools-units-tab]) > div:first-child {
   display: none !important;
