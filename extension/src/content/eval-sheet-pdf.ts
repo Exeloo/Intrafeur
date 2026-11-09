@@ -1,6 +1,6 @@
-// Layout of the handwritten evaluation sheet ("Fiche d'évaluation"). Every
-// string that ends up in the PDF is French on purpose — the sheet is printed
-// and filled in by hand, independently of the intranet's UI language.
+// Layout of the handwritten evaluation sheet ("Fiche d'évaluation"). Its
+// strings follow the extension's UI language (WinAnsiEncoding covers the
+// French accents); label columns are measured so either language fits.
 //
 // Two layouts, picked in the options modal:
 // - portrait: Photo | Étudiant | <fields> | [Commentaire], ~10-12 rows/page;
@@ -17,6 +17,8 @@ import {
   type PageSize,
 } from './pdf';
 import type { EvalSheet, EvalSheetLayout, EvalSheetNoteField } from '../types';
+import { currentLocale } from '../i18n/core';
+import { t } from '../i18n/eval-sheet';
 
 export interface SheetStudent {
   firstname: string;
@@ -129,20 +131,21 @@ function capitalize(text: string): string {
 export function formatDay(iso: string): string {
   const date = new Date(iso);
   return capitalize(
-    new Intl.DateTimeFormat('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(date),
+    new Intl.DateTimeFormat(currentLocale(), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(date),
   );
 }
 
 export function formatTime(iso: string): string {
   const date = new Date(iso);
-  return `${String(date.getHours()).padStart(2, '0')}h${String(date.getMinutes()).padStart(2, '0')}`;
+  return t('time', { h: String(date.getHours()).padStart(2, '0'), m: String(date.getMinutes()).padStart(2, '0') });
 }
 
 export function sheetFileName(sheet: EvalSheet): string {
   const d = new Date(sheet.start);
   const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const code = (sheet.unitCode || 'module').replace(/[^A-Za-z0-9_-]+/g, '-');
-  return `fiche-evaluation_${code}_${day}_${formatTime(sheet.start)}.pdf`;
+  const time = formatTime(sheet.start).replace(/[^0-9a-z]/gi, 'h'); // no ':' in file names
+  return `${t('fileName')}_${code}_${day}_${time}.pdf`;
 }
 
 function labelValue(
@@ -157,6 +160,12 @@ function labelValue(
 ): void {
   page.text(label, x, y, { font: 'bold', size });
   page.text(fitText(value, 'regular', size, width - labelWidth), x + labelWidth, y, { size });
+}
+
+// Label column width: at least `min` (the French layout's), wider when a
+// label (e.g. English) needs it.
+function labelWidth(min: number, size: number, ...labels: string[]): number {
+  return Math.max(min, ...labels.map((l) => textWidth(l, 'bold', size) + 6));
 }
 
 // Left edges of every column, relative to MARGIN.
@@ -181,11 +190,11 @@ function drawTableHeader(page: PdfPage, g: Geometry, layout: EvalSheetLayout, to
   const opts = { font: 'bold' as const, size: 10 };
   const edges = columnEdges(g, layout.fields);
   const left = g.tableLeft;
-  if (g.photoCol) page.text('Photo', left + g.photoCol / 2, y, { ...opts, align: 'center' });
+  if (g.photoCol) page.text(t('photo'), left + g.photoCol / 2, y, { ...opts, align: 'center' });
   if (g.landscape) {
-    page.text('Étudiant', left + edges.student + g.studentCol / 2, y, { ...opts, align: 'center' });
+    page.text(t('student'), left + edges.student + g.studentCol / 2, y, { ...opts, align: 'center' });
   } else {
-    page.text('Étudiant', left + edges.student + 8, y, opts);
+    page.text(t('student'), left + edges.student + 8, y, opts);
   }
   // Narrow columns: shrink the labels (all together, so they match) before
   // resorting to an ellipsis.
@@ -199,7 +208,7 @@ function drawTableHeader(page: PdfPage, g: Geometry, layout: EvalSheetLayout, to
     });
   });
   if (g.commentCol) {
-    page.text('Commentaire', left + edges.comment + g.commentCol / 2, y, { ...opts, align: 'center' });
+    page.text(t('comment'), left + edges.comment + g.commentCol / 2, y, { ...opts, align: 'center' });
   }
 }
 
@@ -297,13 +306,17 @@ function drawSlotCell(page: PdfPage, slot: { start: string; end: string }, top: 
 
 function drawPortraitHeader(page: PdfPage, g: Geometry, info: SheetInfo): void {
   const w = g.contentWidth;
-  page.text("Fiche d'évaluation", MARGIN, 58, { font: 'bold', size: 20 });
-  labelValue(page, 'Activité :', info.activity, MARGIN, 88, w);
-  labelValue(page, 'Module :', info.module, MARGIN, 105, w);
-  labelValue(page, 'Lieu :', info.location, MARGIN, 122, w);
-  labelValue(page, 'Date :', info.day, MARGIN, 139, w);
-  labelValue(page, 'Horaire :', info.hours, MARGIN, 156, w);
-  labelValue(page, 'Étudiants inscrits :', info.count, MARGIN, 173, w);
+  const rows: [string, string][] = [
+    [t('activity'), info.activity],
+    [t('module'), info.module],
+    [t('location'), info.location],
+    [t('date'), info.day],
+    [t('hours'), info.hours],
+    [t('registered'), info.count],
+  ];
+  const lw = labelWidth(118, 11, ...rows.map((r) => r[0]));
+  page.text(t('pdfTitle'), MARGIN, 58, { font: 'bold', size: 20 });
+  rows.forEach(([label, value], i) => labelValue(page, label, value, MARGIN, 88 + i * 17, w, 11, lw));
 }
 
 // Compact header (small title, three 9pt columns of two lines) so the 4
@@ -312,28 +325,33 @@ function drawLandscapeHeader(page: PdfPage, g: Geometry, info: SheetInfo): void 
   const size = 9;
   const third = g.contentWidth / 3;
   const width = third - 10;
-  const cols = [MARGIN, MARGIN + third, MARGIN + third * 2];
-  page.text("Fiche d'évaluation", MARGIN, 36, { font: 'bold', size: 14 });
-  labelValue(page, 'Activité :', info.activity, cols[0], 54, width, size, 50);
-  labelValue(page, 'Module :', info.module, cols[0], 66, width, size, 50);
-  labelValue(page, 'Lieu :', info.location, cols[1], 54, width, size, 36);
-  labelValue(page, 'Date :', info.day, cols[1], 66, width, size, 36);
-  labelValue(page, 'Horaire :', info.hours, cols[2], 54, width, size, 88);
-  labelValue(page, 'Étudiants inscrits :', info.count, cols[2], 66, width, size, 88);
+  const cols: [number, [string, string][]][] = [
+    [50, [[t('activity'), info.activity], [t('module'), info.module]]],
+    [36, [[t('location'), info.location], [t('date'), info.day]]],
+    [88, [[t('hours'), info.hours], [t('registered'), info.count]]],
+  ];
+  page.text(t('pdfTitle'), MARGIN, 36, { font: 'bold', size: 14 });
+  cols.forEach(([min, lines], c) => {
+    const lw = labelWidth(min, size, ...lines.map((l) => l[0]));
+    lines.forEach(([label, value], i) => labelValue(page, label, value, MARGIN + third * c, 54 + i * 12, width, size, lw));
+  });
 }
 
 // "Module" and "Date" only (date and time on one line), when the user picked
 // the reduced header.
 function drawMinimalHeader(page: PdfPage, g: Geometry, info: SheetInfo): void {
   const when = `${info.day}, ${info.hours}`;
+  const module = t('module');
+  const date = t('date');
   if (g.landscape) {
     const half = g.contentWidth / 2;
-    labelValue(page, 'Module :', info.module, MARGIN, 38, half - 10, 9, 46);
-    labelValue(page, 'Date :', when, MARGIN + half, 38, half - 10, 9, 34);
+    labelValue(page, module, info.module, MARGIN, 38, half - 10, 9, labelWidth(46, 9, module));
+    labelValue(page, date, when, MARGIN + half, 38, half - 10, 9, labelWidth(34, 9, date));
     return;
   }
-  labelValue(page, 'Module :', info.module, MARGIN, 50, g.contentWidth, 11, 62);
-  labelValue(page, 'Date :', when, MARGIN, 67, g.contentWidth, 11, 62);
+  const lw = labelWidth(62, 11, module, date);
+  labelValue(page, module, info.module, MARGIN, 50, g.contentWidth, 11, lw);
+  labelValue(page, date, when, MARGIN, 67, g.contentWidth, 11, lw);
 }
 
 interface SheetInfo {
@@ -358,7 +376,7 @@ export function buildEvalSheetPdf(
   const info: SheetInfo = {
     activity: sheet.activity,
     module: sheet.unitName ? `${sheet.unitCode} – ${sheet.unitName}` : sheet.unitCode,
-    location: sheet.location || 'Non précisé',
+    location: sheet.location || t('notSpecified'),
     day: formatDay(sheet.start),
     hours: `${formatTime(sheet.start)} – ${formatTime(sheet.end)}`,
     count: String(students.length),
@@ -433,12 +451,12 @@ export function buildEvalSheetPdf(
   flushRun();
 
   if (students.length === 0) {
-    page.text('Aucun étudiant inscrit.', MARGIN, top + 24, { size: 11, color: GRAY_TEXT });
+    page.text(t('noStudents'), MARGIN, top + 24, { size: 11, color: GRAY_TEXT });
   }
 
   const total = doc.pages.length;
   doc.pages.forEach((p, i) => {
-    p.text(`Page ${i + 1} / ${total}`, g.size.width / 2, g.size.height - 24, {
+    p.text(t('page', { n: i + 1, total }), g.size.width / 2, g.size.height - 24, {
       size: 8,
       color: GRAY_TEXT,
       align: 'center',

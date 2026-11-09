@@ -2,6 +2,8 @@
 // API key and does the fetches), the per-event status cache, and small pure
 // helpers shared by intrastek.ts and intrastek-ui.ts.
 import browser from 'webextension-polyfill';
+import { currentLocale } from '../i18n/core';
+import { t } from '../i18n/intrastek';
 import type {
   IntrastekActivity,
   IntrastekEventState,
@@ -38,9 +40,9 @@ async function call<T>(type: MessageType, payload: unknown): Promise<T> {
   } catch (err) {
     // "Extension context invalidated": the tab wasn't reloaded after an
     // extension reload.
-    throw new IntrastekError(0, `Intrafeur error: ${(err as Error)?.message || err}. Reload the page.`);
+    throw new IntrastekError(0, t('extensionError', { error: (err as Error)?.message || String(err) }));
   }
-  if (!res || typeof res !== 'object') throw new IntrastekError(0, 'Unexpected answer from the extension');
+  if (!res || typeof res !== 'object') throw new IntrastekError(0, t('unexpectedAnswer'));
   if (!res.ok) throw new IntrastekError(res.status, res.message);
   return res.data;
 }
@@ -84,6 +86,11 @@ function notify(): void {
 
 export function cachedState(id: number): IntrastekEventState | null {
   return cache.get(id)?.state ?? null;
+}
+
+/** A first fetch is running for one of these ids (nothing to show yet). */
+export function isFirstLoad(ids: number[]): boolean {
+  return ids.some((id) => inflight.has(id) && !cache.has(id));
 }
 
 function needsFetch(id: number, now: number): boolean {
@@ -161,7 +168,7 @@ export async function runWrite(write: () => Promise<IntrastekWriteResult>): Prom
 }
 
 export function resultMessage(res: IntrastekWriteResult): string {
-  return res.result === 'proposed' ? 'Proposal sent – waiting for admin approval' : 'Applied';
+  return res.result === 'proposed' ? t('proposalSent') : t('applied');
 }
 
 // --- Views over a state ---
@@ -219,8 +226,14 @@ function guessedHead(eventId: number, groupId: string | null): number | null {
   return head !== null && onIntrastek(head, groupId) ? head : null;
 }
 
-function guessHead(eventId: number): number | null {
-  const byId = new Map<number, { activity: string; start: number; end: number }>();
+type TaggedBlock = { activity: string; start: number; end: number };
+let blockIndex: Map<number, TaggedBlock> | null = null;
+
+// Built once per synchronous pass (a decorate pass calls guessHead for every
+// block; rescanning the document each time was O(n²)), dropped right after.
+function taggedBlocks(): Map<number, TaggedBlock> {
+  if (blockIndex) return blockIndex;
+  const byId = new Map<number, TaggedBlock>();
   for (const el of Array.from(document.querySelectorAll(`[${EVENT_ID_ATTR}][${EVENT_ACTIVITY_ATTR}]`))) {
     const id = parseEventId(el.getAttribute(EVENT_ID_ATTR));
     const activity = el.getAttribute(EVENT_ACTIVITY_ATTR);
@@ -228,6 +241,13 @@ function guessHead(eventId: number): number | null {
     const end = Date.parse(el.getAttribute(EVENT_END_ATTR) ?? '');
     if (id && activity && Number.isFinite(start) && Number.isFinite(end)) byId.set(id, { activity, start, end });
   }
+  blockIndex = byId;
+  setTimeout(() => (blockIndex = null), 0);
+  return byId;
+}
+
+function guessHead(eventId: number): number | null {
+  const byId = taggedBlocks();
   const self = byId.get(eventId);
   if (!self) return null;
   const day = parisDay.format(self.start);
@@ -253,7 +273,7 @@ export function targetGroupId(me: IntrastekMe, configured: string): string | nul
 }
 
 export function groupName(groups: IntrastekGroup[], id: string): string {
-  return groups.find((g) => g.id === id)?.name ?? `group ${id.slice(0, 8)}`;
+  return groups.find((g) => g.id === id)?.name ?? t('groupFallback', { id: id.slice(0, 8) });
 }
 
 export function canWrite(me: IntrastekMe): boolean {
@@ -265,9 +285,9 @@ export function personName(p: { firstName: string; lastName: string }): string {
 }
 
 export function proposalSummary(p: IntrastekProposal): string {
-  if (p.kind === 'REMOVE') return 'remove the activities';
-  const value = p.nbUserAsk === null ? '?' : String(p.nbUserAsk);
-  return p.kind === 'INIT' ? `initialize with ${value} AER(s)` : `set AERs needed to ${value}`;
+  if (p.kind === 'REMOVE') return t('summaryRemove');
+  const n = p.nbUserAsk === null ? '?' : String(p.nbUserAsk);
+  return p.kind === 'INIT' ? t('summaryInit', { n }) : t('summarySet', { n });
 }
 
 // "Mon 27 Oct, 09:00–12:00" in Paris time; '' when the (untrusted) values
@@ -276,13 +296,13 @@ export function formatEventDate(start: string | null, end: string | null): strin
   const s = start ? new Date(start) : null;
   if (!s || Number.isNaN(s.getTime())) return '';
   const e = end ? new Date(end) : null;
-  const day = new Intl.DateTimeFormat(undefined, {
+  const day = new Intl.DateTimeFormat(currentLocale(), {
     weekday: 'short',
     day: 'numeric',
     month: 'short',
     timeZone: 'Europe/Paris',
   }).format(s);
-  const time = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' });
+  const time = new Intl.DateTimeFormat(currentLocale(), { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' });
   const range = e && !Number.isNaN(e.getTime()) ? `${time.format(s)}–${time.format(e)}` : time.format(s);
   return `${day}, ${range}`;
 }

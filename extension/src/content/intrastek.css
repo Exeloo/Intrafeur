@@ -1,6 +1,6 @@
 /* Intrastek (isolated world, injected on every my.epitech.eu page). Generic
    .epitools-modal* rules come from unit-filters.css, .epitools-menu* from
-   attendance.css. */
+   attendance.css, toast/spinner/busy from shared.css. */
 
 /* Event modal header button */
 .epitools-ik-btn {
@@ -168,6 +168,10 @@
 }
 
 /* Right-click menu (a .epitools-menu) */
+.epitools-ik-menu-loading {
+  padding: 4px 8px 6px;
+}
+
 .epitools-ik-menu {
   max-width: 320px;
 }
@@ -201,50 +205,6 @@
   border-radius: 4px;
   padding: 4px 6px;
   font-size: 12px;
-}
-
-/* Toast */
-.epitools-ik-toast {
-  position: fixed;
-  right: 16px;
-  bottom: 16px;
-  z-index: 1000001;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  max-width: 420px;
-  padding: 10px 12px;
-  border-radius: 6px;
-  background: #1e1e1e;
-  color: #e6e6e6;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  font-size: 13px;
-}
-
-.epitools-ik-toast--success {
-  border-color: #2fb344;
-}
-
-.epitools-ik-toast--error {
-  border-color: #ff6b6b;
-}
-
-.epitools-ik-toast button {
-  background: #2a2a2a;
-  color: inherit;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 4px;
-  padding: 3px 8px;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.epitools-ik-toast .epitools-ik-toast-close {
-  border: none;
-  background: none;
-  font-size: 16px;
-  padding: 0 2px;
 }
 
 /* Intrastek mode toggle (a clone of the site's header button) */

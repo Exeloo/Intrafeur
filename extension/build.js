@@ -25,23 +25,16 @@ const FIREFOX_UPDATE_URL = (process.env.FIREFOX_UPDATE_URL || '').trim();
 
 const ENTRY_POINTS = [
   { in: 'src/background.ts', out: 'background.js' },
-  { in: 'src/content/attendance.ts', out: 'content/attendance.js' },
-  { in: 'src/content/unit-filters.ts', out: 'content/unit-filters.js' },
-  { in: 'src/content/event-info.ts', out: 'content/event-info.js' },
-  { in: 'src/content/event-info-toggle.ts', out: 'content/event-info-toggle.js' },
-  { in: 'src/content/eval-sheet.ts', out: 'content/eval-sheet.js' },
-  { in: 'src/content/eval-sheet-page.ts', out: 'content/eval-sheet-page.js' },
-  { in: 'src/content/intrastek.ts', out: 'content/intrastek.js' },
-  { in: 'src/content/intrastek-page.ts', out: 'content/intrastek-page.js' },
-  { in: 'src/content/absence-status.ts', out: 'content/absence-status.js' },
-  { in: 'src/content/student-units.ts', out: 'content/student-units.js' },
-  { in: 'src/content/attendance-present.ts', out: 'content/attendance-present.js' },
-  { in: 'src/content/hide-grades.ts', out: 'content/hide-grades.js' },
+  // One bundle per content-script world (see src/content/isolated.ts / main-world.ts).
+  { in: 'src/content/isolated.ts', out: 'content/isolated.js' },
+  { in: 'src/content/main-world.ts', out: 'content/main-world.js' },
   { in: 'src/options/options.ts', out: 'options/options.js' },
   { in: 'src/popup/popup.ts', out: 'popup/popup.js' },
+  { in: 'src/setup/setup.ts', out: 'setup/setup.js' },
 ];
 
 const STATIC_FILES = [
+  'src/content/shared.css',
   'src/content/attendance.css',
   'src/content/unit-filters.css',
   'src/content/event-info.css',
@@ -54,11 +47,16 @@ const STATIC_FILES = [
   'src/options/options.css',
   'src/popup/popup.html',
   'src/popup/popup.css',
+  'src/ui/pages.css',
+  'src/setup/setup.html',
+  'src/setup/setup.css',
+  '_locales/en/messages.json',
+  '_locales/fr/messages.json',
 ];
 
 function copyFile(relSrc, outDir) {
   const src = path.join(ROOT, relSrc);
-  const dest = path.join(outDir, path.relative('src', relSrc));
+  const dest = path.join(outDir, relSrc.startsWith('src/') ? path.relative('src', relSrc) : relSrc);
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.copyFileSync(src, dest);
 }

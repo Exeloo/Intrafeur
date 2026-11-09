@@ -1,62 +1,26 @@
+// Toolbar popup: the shared feature list (chrome://flags style) + links.
+// Never requests permissions here: the browser prompt closes the popup.
 import browser from 'webextension-polyfill';
-import {
-  ABSENCE_STATUS_ENABLED_KEY,
-  ABSENCE_STATUS_ENABLED_DEFAULT,
-  FACTIONS_ENABLED_KEY,
-  FACTIONS_ENABLED_DEFAULT,
-  EVAL_SHEET_ENABLED_KEY,
-  EVAL_SHEET_ENABLED_DEFAULT,
-  EVENT_INFO_ENABLED_KEY,
-  EVENT_INFO_ENABLED_DEFAULT,
-  UNIT_FILTERS_ENABLED_KEY,
-  UNIT_FILTERS_ENABLED_DEFAULT,
-} from '../types';
+import { initLang } from '../i18n/load';
+import { popupEn, tPopup } from '../i18n/pages-popup';
+import { applyI18n, openOptionsSection, requireEl } from '../ui/dom';
+import { featureList } from '../ui/features';
 
-async function init(): Promise<void> {
-  const checkbox = document.getElementById('factionsEnabled') as HTMLInputElement;
-
-  const eventInfoCheckbox = document.getElementById('eventInfoEnabled') as HTMLInputElement;
-  const evalCheckbox = document.getElementById('evalSheetEnabled') as HTMLInputElement;
-  const unitFiltersCheckbox = document.getElementById('unitFiltersEnabled') as HTMLInputElement;
-  const absenceStatusCheckbox = document.getElementById('absenceStatusEnabled') as HTMLInputElement;
-
-  const stored = await browser.storage.local.get({
-    [FACTIONS_ENABLED_KEY]: FACTIONS_ENABLED_DEFAULT,
-    [EVENT_INFO_ENABLED_KEY]: EVENT_INFO_ENABLED_DEFAULT,
-    [EVAL_SHEET_ENABLED_KEY]: EVAL_SHEET_ENABLED_DEFAULT,
-    [UNIT_FILTERS_ENABLED_KEY]: UNIT_FILTERS_ENABLED_DEFAULT,
-    [ABSENCE_STATUS_ENABLED_KEY]: ABSENCE_STATUS_ENABLED_DEFAULT,
-  });
-  checkbox.checked = stored[FACTIONS_ENABLED_KEY] !== false;
-  eventInfoCheckbox.checked = stored[EVENT_INFO_ENABLED_KEY] !== false;
-  evalCheckbox.checked = stored[EVAL_SHEET_ENABLED_KEY] === true;
-  unitFiltersCheckbox.checked = stored[UNIT_FILTERS_ENABLED_KEY] !== false;
-  absenceStatusCheckbox.checked = stored[ABSENCE_STATUS_ENABLED_KEY] !== false;
-
-  checkbox.addEventListener('change', () => {
-    browser.storage.local.set({ [FACTIONS_ENABLED_KEY]: checkbox.checked });
-  });
-
-  eventInfoCheckbox.addEventListener('change', () => {
-    browser.storage.local.set({ [EVENT_INFO_ENABLED_KEY]: eventInfoCheckbox.checked });
-  });
-
-  unitFiltersCheckbox.addEventListener('change', () => {
-    browser.storage.local.set({ [UNIT_FILTERS_ENABLED_KEY]: unitFiltersCheckbox.checked });
-  });
-
-  absenceStatusCheckbox.addEventListener('change', () => {
-    browser.storage.local.set({ [ABSENCE_STATUS_ENABLED_KEY]: absenceStatusCheckbox.checked });
-  });
-
-  evalCheckbox.addEventListener('change', () => {
-    browser.storage.local.set({ [EVAL_SHEET_ENABLED_KEY]: evalCheckbox.checked });
-  });
-
-  document.getElementById('openOptions')?.addEventListener('click', (ev) => {
-    ev.preventDefault();
-    browser.runtime.openOptionsPage();
-  });
+function openAndClose(open: Promise<unknown>): void {
+  void open.finally(() => window.close());
 }
 
-init();
+async function init(): Promise<void> {
+  await initLang(() => location.reload());
+  applyI18n(tPopup, popupEn);
+  requireEl('version').textContent = `v${browser.runtime.getManifest().version}`;
+  requireEl('features').appendChild(
+    featureList({ language: true, openSection: (section) => openAndClose(openOptionsSection(section)) }),
+  );
+  requireEl('openSettings').addEventListener('click', () => openAndClose(browser.runtime.openOptionsPage()));
+  requireEl('openSetup').addEventListener('click', () =>
+    openAndClose(browser.tabs.create({ url: browser.runtime.getURL('setup/setup.html') })),
+  );
+}
+
+void init();

@@ -1,6 +1,8 @@
-// DOM injection helpers for the Attendances page. Kept free of any
-// network/messaging concerns so it can be reused by future pages.
+// DOM injection helpers for the Faction column/badges. Kept free of any
+// network/messaging concerns.
 import type { Faction, RowMeta } from '../types';
+import { t } from '../i18n/factions';
+import { button, el, setBusy, spinner, toast } from './shared/ui';
 
 const MARKER_ATTR = 'data-epitools-email';
 const HEADER_MARKER_ATTR = 'data-epitools-header';
@@ -57,56 +59,18 @@ export function ensureFactionHeaderCell(
   const existing = theadRow.querySelector<HTMLTableCellElement>(`th[${HEADER_MARKER_ATTR}]`);
   if (existing) return existing;
 
-  const th = document.createElement('th');
+  const th = el('th', 'epitools-th');
   th.setAttribute(HEADER_MARKER_ATTR, '1');
-  th.className = 'epitools-th';
 
-  // Native column headers use a plain clickable <div> for the label, not a
-  // <button> — this site applies global button styling (uppercase text,
-  // font-weight 500) that overrode the th's own bold/normal-case text when
-  // these were <button> elements. role="button" + tabIndex keeps them
-  // keyboard-accessible without picking up that styling.
-  const sortBtn = document.createElement('div');
-  sortBtn.className = 'epitools-th-sort';
-  sortBtn.setAttribute('role', 'button');
-  sortBtn.tabIndex = 0;
-
-  const label = document.createElement('span');
-  label.className = 'epitools-th-label';
-  label.textContent = 'Faction';
-  const sortIconWrap = document.createElement('span');
-  sortIconWrap.className = 'epitools-sort-icon';
+  const sortBtn = divButton('epitools-th-sort', () => handlers.onSortClick());
+  const sortIconWrap = el('span', 'epitools-sort-icon');
   sortIconWrap.appendChild(buildIconSvg(SORT_ICON_PATHS));
-  sortBtn.appendChild(label);
-  sortBtn.appendChild(sortIconWrap);
+  sortBtn.append(el('span', 'epitools-th-label', t('faction')), sortIconWrap);
 
-  sortBtn.addEventListener('click', (ev) => {
-    ev.stopPropagation();
-    handlers.onSortClick();
-  });
-  sortBtn.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Enter' || ev.key === ' ') {
-      ev.preventDefault();
-      handlers.onSortClick();
-    }
-  });
-
-  const filterBtn = document.createElement('div');
-  filterBtn.className = 'epitools-th-filter';
-  filterBtn.setAttribute('role', 'button');
-  filterBtn.tabIndex = 0;
+  const filterBtn = divButton('epitools-th-filter', () => handlers.onFilterClick(filterBtn));
   filterBtn.appendChild(buildIconSvg(FILTER_ICON_PATHS));
-  filterBtn.title = 'Filter by faction';
-  filterBtn.addEventListener('click', (ev) => {
-    ev.stopPropagation();
-    handlers.onFilterClick(filterBtn);
-  });
-  filterBtn.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Enter' || ev.key === ' ') {
-      ev.preventDefault();
-      handlers.onFilterClick(filterBtn);
-    }
-  });
+  filterBtn.title = t('filterByFaction');
+  filterBtn.setAttribute('aria-label', t('filterByFaction'));
 
   th.appendChild(sortBtn);
   th.appendChild(filterBtn);
@@ -116,6 +80,27 @@ export function ensureFactionHeaderCell(
     theadRow.appendChild(th);
   }
   return th;
+}
+
+// Native column headers use a plain clickable <div> for the label, not a
+// <button>: this site applies global button styling (uppercase text,
+// font-weight 500) that overrode the th's own text. role="button" +
+// tabIndex keeps them keyboard-accessible without picking up that styling.
+function divButton(className: string, onActivate: () => void): HTMLDivElement {
+  const node = el('div', className);
+  node.setAttribute('role', 'button');
+  node.tabIndex = 0;
+  node.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    onActivate();
+  });
+  node.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' || ev.key === ' ') {
+      ev.preventDefault();
+      onActivate();
+    }
+  });
+  return node;
 }
 
 export function setFactionHeaderSortIcon(th: HTMLElement | null, sortDir: 'asc' | 'desc' | null): void {
@@ -168,8 +153,9 @@ export function hijackExportButton(table: HTMLTableElement, onExport: () => void
 
   const originalLabel = btn.getAttribute('aria-label') || 'Export to CSV';
   btn.setAttribute(EXPORT_HIJACK_ATTR, '1');
-  btn.setAttribute('aria-label', `${originalLabel} (+ factions)`);
-  btn.title = `${originalLabel} (+ factions)`;
+  const label = t('exportLabel', { label: originalLabel });
+  btn.setAttribute('aria-label', label);
+  btn.title = label;
   btn.addEventListener(
     'click',
     (ev) => {
@@ -190,23 +176,55 @@ function readableTextColor(hexColor: string): string {
   return luminance > 0.6 ? '#1a1a1a' : '#ffffff';
 }
 
+const UNASSIGNED_COLOR = '#888888';
+
+// What a faction cell shows: a spinner while the shared data loads, an
+// "Unavailable" badge (click = the error) when it failed, else the faction
+// badge, busy while its assignment is being saved.
+export interface BadgeView {
+  status: 'loading' | 'error' | 'ready' | 'busy';
+  error?: string;
+  faction: Faction | null;
+  factions: Faction[];
+  onPick: (factionId: number | null) => void;
+}
+
 // Badge filled solid with the faction's own color, with text color picked
-// for contrast against it rather than a fixed white/black.
-function renderBadge(cell: HTMLElement, faction: Faction | null): HTMLButtonElement {
-  cell.replaceChildren();
-  const badge = document.createElement('button');
-  badge.type = 'button';
-  badge.className = 'epitools-badge';
-  const color = faction ? faction.color : '#888888';
-  badge.textContent = faction ? faction.name : 'Unassigned';
+// for contrast against it rather than a fixed white/black. `preventDefault`:
+// the member cards sit inside a clickable <button> that navigates elsewhere.
+function renderBadge(cell: HTMLElement, view: BadgeView, preventDefault = false): void {
+  if (view.status === 'loading') {
+    const loader = spinner('');
+    loader.title = t('loading');
+    loader.setAttribute('aria-label', t('loading'));
+    cell.replaceChildren(loader);
+    return;
+  }
+  const failed = view.status === 'error';
+  const faction = failed ? null : view.faction;
+  const color = faction ? faction.color : UNASSIGNED_COLOR;
+  const badge = button(failed ? t('unavailable') : faction ? faction.name : t('unassigned'), 'epitools-badge');
   badge.style.backgroundColor = color;
   badge.style.color = readableTextColor(color);
-  cell.appendChild(badge);
-  return badge;
+  if (failed) badge.title = view.error || '';
+  if (view.status === 'busy') setBusy(badge);
+  badge.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    if (preventDefault) ev.preventDefault();
+    if (failed) toast(view.error || t('unavailable'), 'error');
+    else openFactionMenu(badge, view.factions, faction ? faction.id : null, view.onPick);
+  });
+  cell.replaceChildren(badge);
 }
 
 export function closeAnyOpenMenu(): void {
   document.querySelector('.epitools-menu')?.remove();
+}
+
+function swatch(color: string): HTMLSpanElement {
+  const node = el('span', 'epitools-swatch');
+  node.style.backgroundColor = color;
+  return node;
 }
 
 function positionMenu(menu: HTMLElement, anchorEl: HTMLElement): void {
@@ -233,13 +251,9 @@ function openFactionMenu(
 ): void {
   closeAnyOpenMenu();
 
-  const menu = document.createElement('div');
-  menu.className = 'epitools-menu';
+  const menu = el('div', 'epitools-menu');
 
-  const noneItem = document.createElement('button');
-  noneItem.type = 'button';
-  noneItem.className = 'epitools-menu-item';
-  noneItem.textContent = 'Unassigned';
+  const noneItem = button(t('unassigned'), 'epitools-menu-item');
   if (currentFactionId == null) noneItem.classList.add('epitools-menu-item-active');
   noneItem.addEventListener('click', () => {
     closeAnyOpenMenu();
@@ -248,14 +262,8 @@ function openFactionMenu(
   menu.appendChild(noneItem);
 
   for (const faction of factions) {
-    const item = document.createElement('button');
-    item.type = 'button';
-    item.className = 'epitools-menu-item';
-    const swatch = document.createElement('span');
-    swatch.className = 'epitools-swatch';
-    swatch.style.backgroundColor = faction.color;
-    item.appendChild(swatch);
-    item.appendChild(document.createTextNode(faction.name));
+    const item = button('', 'epitools-menu-item');
+    item.append(swatch(faction.color), faction.name);
     if (faction.id === currentFactionId) item.classList.add('epitools-menu-item-active');
     item.addEventListener('click', () => {
       closeAnyOpenMenu();
@@ -282,22 +290,15 @@ export function openChecklistMenu(
 ): HTMLElement {
   closeAnyOpenMenu();
 
-  const menu = document.createElement('div');
-  menu.className = 'epitools-menu';
+  const menu = el('div', 'epitools-menu');
 
   for (const option of options) {
-    const item = document.createElement('label');
-    item.className = 'epitools-menu-item';
-    const checkbox = document.createElement('input');
+    const item = el('label', 'epitools-menu-item');
+    const checkbox = el('input');
     checkbox.type = 'checkbox';
     checkbox.checked = checkedIds.has(option.id);
     checkbox.addEventListener('change', () => onToggle(option.id, checkbox.checked));
-    item.appendChild(checkbox);
-    const swatch = document.createElement('span');
-    swatch.className = 'epitools-swatch';
-    swatch.style.backgroundColor = option.color;
-    item.appendChild(swatch);
-    item.appendChild(document.createTextNode(option.name));
+    item.append(checkbox, swatch(option.color), option.name);
     menu.appendChild(item);
   }
 
@@ -307,91 +308,54 @@ export function openChecklistMenu(
 
 export function ensureRowCell(
   tr: HTMLTableRowElement,
-  email: string,
-  faction: Faction | null,
-  factions: Faction[],
-  onAssign: (email: string, factionId: number | null) => void,
+  view: BadgeView,
   insertAfter?: HTMLTableCellElement | null,
 ): HTMLTableCellElement {
   let td = tr.querySelector<HTMLTableCellElement>(`td[${HEADER_MARKER_ATTR}]`);
   if (!td) {
-    td = document.createElement('td');
+    td = el('td', 'epitools-td');
     td.setAttribute(HEADER_MARKER_ATTR, '1');
-    td.className = 'epitools-td';
-    if (insertAfter && insertAfter.parentElement === tr) {
-      insertAfter.after(td);
-    } else {
-      tr.appendChild(td);
-    }
+    if (insertAfter && insertAfter.parentElement === tr) insertAfter.after(td);
+    else tr.appendChild(td);
   }
-
-  const badge = renderBadge(td, faction);
-  badge.addEventListener('click', (ev) => {
-    ev.stopPropagation();
-    openFactionMenu(badge, factions, faction ? faction.id : null, (factionId) => {
-      onAssign(email, factionId);
-    });
-  });
-
+  renderBadge(td, view);
   return td;
 }
 
 // Same badge, for a person row that isn't a table cell — the Registered
 // Groups cards (Projects) are a repeated <div> layout (avatar + name/email
 // stack), not a <table>. `container` is that row's own flex wrapper (avatar
-// + name/email), so the badge lands as a third item alongside them. The row
-// is wrapped in a clickable <button> that navigates elsewhere, hence
-// preventDefault in addition to the usual stopPropagation.
-export function ensureMemberBadge(
-  container: HTMLElement,
-  email: string,
-  faction: Faction | null,
-  factions: Faction[],
-  onAssign: (email: string, factionId: number | null) => void,
-): HTMLElement {
+// + name/email), so the badge lands as a third item alongside them.
+export function ensureMemberBadge(container: HTMLElement, view: BadgeView): HTMLElement {
   let wrap = container.querySelector<HTMLElement>(`span[${HEADER_MARKER_ATTR}]`);
   if (!wrap) {
-    wrap = document.createElement('span');
+    wrap = el('span', 'epitools-member-badge-wrap');
     wrap.setAttribute(HEADER_MARKER_ATTR, '1');
-    wrap.className = 'epitools-member-badge-wrap';
     container.appendChild(wrap);
   }
-
-  const badge = renderBadge(wrap, faction);
-  badge.addEventListener('click', (ev) => {
-    ev.stopPropagation();
-    ev.preventDefault();
-    openFactionMenu(badge, factions, faction ? faction.id : null, (factionId) => {
-      onAssign(email, factionId);
-    });
-  });
-
+  renderBadge(wrap, view, true);
   return wrap;
 }
 
-export function markRow(el: HTMLElement, email: string): void {
-  el.setAttribute(MARKER_ATTR, email);
+export function markRow(node: HTMLElement, email: string): void {
+  node.setAttribute(MARKER_ATTR, email);
 }
 
-export function getRowEmail(el: HTMLElement): string | null {
-  return el.getAttribute(MARKER_ATTR);
-}
-
-export function isRowMarked(el: HTMLElement): boolean {
-  return el.hasAttribute(MARKER_ATTR);
+export function isRowMarked(node: HTMLElement): boolean {
+  return node.hasAttribute(MARKER_ATTR);
 }
 
 // Used when the faction feature is turned off live (popup toggle) so an
 // already-processed row/card is treated as fresh again if it's turned back
 // on later, rather than staying permanently skipped.
-export function unmarkRow(el: HTMLElement): void {
-  el.removeAttribute(MARKER_ATTR);
+export function unmarkRow(node: HTMLElement): void {
+  node.removeAttribute(MARKER_ATTR);
 }
 
 // Strips every Faction th/td/badge-wrap we injected under `root` (a table or
 // a member card container), used by the same live-toggle-off path.
 export function removeInjectedElements(root: ParentNode): void {
-  root.querySelectorAll(`[${HEADER_MARKER_ATTR}]`).forEach((el) => el.remove());
+  root.querySelectorAll(`[${HEADER_MARKER_ATTR}]`).forEach((node) => node.remove());
 }
 
 export interface SortAndFilterOptions {
@@ -399,7 +363,8 @@ export interface SortAndFilterOptions {
   filterFactionIds: Set<FactionKey>;
 }
 
-// sortDir null | 'asc' | 'desc' — name-sort was dropped since the site's own
+// Idempotent (no DOM write when nothing changes), so it can run on every
+// check. sortDir null | 'asc' | 'desc' — name-sort was dropped since the site's own
 // Student column already sorts natively; Faction is the only sort this
 // extension still needs to provide.
 export function applySortAndFilter(
@@ -417,7 +382,8 @@ export function applySortAndFilter(
     }
     const factionKey: FactionKey = meta.factionId == null ? UNASSIGNED : meta.factionId;
     const visible = !filterFactionIds || filterFactionIds.size === 0 || filterFactionIds.has(factionKey);
-    tr.style.display = visible ? '' : 'none';
+    const display = visible ? '' : 'none';
+    if (tr.style.display !== display) tr.style.display = display;
   }
 
   if (sortDir) {
@@ -429,8 +395,10 @@ export function applySortAndFilter(
       return sortDir === 'desc' ? -cmp : cmp;
     });
 
-    for (const tr of sorted) {
-      tbody.appendChild(tr);
+    // Only move rows when the order is actually wrong: every move is a
+    // mutation that wakes the shared observer, which calls this again.
+    if (sorted.some((tr, i) => tr !== rows[i])) {
+      for (const tr of sorted) tbody.appendChild(tr);
     }
   }
 }

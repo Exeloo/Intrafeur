@@ -10,10 +10,16 @@ interface AssignmentBody {
   factionId?: unknown;
 }
 
+const selectAll = db.prepare('SELECT student_email, faction_id FROM assignments WHERE faction_id IS NOT NULL');
+const factionExists = db.prepare('SELECT id FROM factions WHERE id = ?');
+const upsert = db.prepare(
+  `INSERT INTO assignments (student_email, faction_id, updated_at)
+   VALUES (?, ?, datetime('now'))
+   ON CONFLICT(student_email) DO UPDATE SET faction_id = excluded.faction_id, updated_at = excluded.updated_at`,
+);
+
 router.get('/', (req: Request, res: Response) => {
-  const rows = db
-    .prepare('SELECT student_email, faction_id FROM assignments WHERE faction_id IS NOT NULL')
-    .all() as AssignmentRow[];
+  const rows = selectAll.all() as AssignmentRow[];
   const map: Record<string, number | null> = {};
   for (const row of rows) {
     map[row.student_email] = row.faction_id;
@@ -33,17 +39,13 @@ router.put('/:email', (req: Request<{ email: string }, unknown, AssignmentBody>,
   }
 
   if (factionId !== null) {
-    const faction = db.prepare('SELECT id FROM factions WHERE id = ?').get(factionId as number);
+    const faction = factionExists.get(factionId as number);
     if (!faction) {
       return res.status(404).json({ error: 'faction not found' });
     }
   }
 
-  db.prepare(
-    `INSERT INTO assignments (student_email, faction_id, updated_at)
-     VALUES (?, ?, datetime('now'))
-     ON CONFLICT(student_email) DO UPDATE SET faction_id = excluded.faction_id, updated_at = excluded.updated_at`,
-  ).run(email, factionId as number | null);
+  upsert.run(email, factionId as number | null);
 
   res.json({ email, factionId });
 });

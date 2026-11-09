@@ -59,20 +59,28 @@ function listReleases(): { file: string; match: RegExpExecArray }[] {
     .sort((a, b) => compareVersions(a.match[1], b.match[1]));
 }
 
+// sha256 per file, reused while the file's mtime/size are unchanged: Firefox
+// polls updates.json regularly and re-hashing every XPI each time is wasted IO.
+const hashCache = new Map<string, { stamp: string; hash: string }>();
+function fileHash(file: string): string {
+  const full = path.join(RELEASES_DIR, file);
+  const stat = fs.statSync(full);
+  const stamp = `${stat.mtimeMs}:${stat.size}`;
+  const cached = hashCache.get(file);
+  if (cached?.stamp === stamp) return cached.hash;
+  const hash = crypto.createHash('sha256').update(fs.readFileSync(full)).digest('hex');
+  hashCache.set(file, { stamp, hash });
+  return hash;
+}
+
 const router = express.Router();
 
 router.get('/updates.json', (req: Request, res: Response) => {
-  const updates = listReleases().map(({ file, match }) => {
-    const hash = crypto
-      .createHash('sha256')
-      .update(fs.readFileSync(path.join(RELEASES_DIR, file)))
-      .digest('hex');
-    return {
-      version: match[1],
-      update_link: `${baseUrl(req)}/extension/${file}`,
-      update_hash: `sha256:${hash}`,
-    };
-  });
+  const updates = listReleases().map(({ file, match }) => ({
+    version: match[1],
+    update_link: `${baseUrl(req)}/extension/${file}`,
+    update_hash: `sha256:${fileHash(file)}`,
+  }));
   res.set('Cache-Control', 'no-cache');
   res.json({ addons: { [ADDON_ID]: { updates } } });
 });

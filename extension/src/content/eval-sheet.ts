@@ -1,31 +1,24 @@
 // Evaluation sheet, isolated-world half. The MAIN-world half
 // (eval-sheet-page.ts) injects the buttons and reads the event, students and
 // photos (as data: URLs) out of React state, then hands them over with
-// window.postMessage. This side owns everything that needs extension APIs:
-// the per-browser toggle (mirrored onto <html data-epitools-eval-sheet> so
-// the MAIN world can see it), and building/downloading the PDF.
-import browser from 'webextension-polyfill';
+// window.postMessage. This side owns the presets (extension storage) and
+// building/downloading the PDF. The toggle reaches the MAIN world through
+// <html data-epitools-eval-sheet>, mirrored by shared/mirror.ts.
 import { buildEvalSheetPdf, sheetFileName, type SheetStudent } from './eval-sheet-pdf';
 import { openEvalSheetModal } from './eval-sheet-modal';
 import { loadPresets } from './eval-sheet-presets';
 import type { JpegImage } from './pdf';
+import { FLAGS, mirroredFlagOn } from '../settings';
+import { t } from '../i18n/eval-sheet';
 import {
-  EVAL_SHEET_ENABLED_KEY,
-  EVAL_SHEET_ENABLED_DEFAULT,
   EVAL_SHEET_REQUEST,
   EVAL_SHEET_ACK,
   type EvalSheet,
-  type EvalSheetLayout,
   type EvalSheetStudent,
 } from '../types';
 
 const PHOTO_PIXELS = 160;
 const PHOTO_CONCURRENCY = 6;
-
-function setEnabledFlag(enabled: boolean): void {
-  if (enabled) document.documentElement.dataset.epitoolsEvalSheet = 'on';
-  else delete document.documentElement.dataset.epitoolsEvalSheet;
-}
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -70,13 +63,14 @@ async function loadPhoto(url: string | null): Promise<JpegImage | null> {
   }
 }
 
-async function loadPhotos(students: EvalSheetStudent[]): Promise<(JpegImage | null)[]> {
+async function loadPhotos(students: EvalSheetStudent[], onEach: () => void): Promise<(JpegImage | null)[]> {
   const results: (JpegImage | null)[] = new Array(students.length).fill(null);
   let next = 0;
   const worker = async (): Promise<void> => {
     while (next < students.length) {
       const i = next++;
       results[i] = await loadPhoto(students[i].photoUrl);
+      onEach();
     }
   };
   await Promise.all(Array.from({ length: Math.min(PHOTO_CONCURRENCY, students.length) }, worker));
@@ -123,21 +117,14 @@ function sortStudents(students: EvalSheetStudent[]): EvalSheetStudent[] {
   );
 }
 
-async function generate(
-  sheet: EvalSheet,
-  students: EvalSheetStudent[],
-  photos: Promise<(JpegImage | null)[]>,
-  layout: EvalSheetLayout,
-): Promise<void> {
-  const loaded = await photos;
-  const rows: SheetStudent[] = students.map((s, i) => ({
+function toSheetStudents(students: EvalSheetStudent[], photos: (JpegImage | null)[]): SheetStudent[] {
+  return students.map((s, i) => ({
     firstname: s.firstname,
     lastname: s.lastname,
     email: s.email,
-    photo: loaded[i],
+    photo: photos[i],
     slot: s.slotStart && s.slotEnd ? { start: s.slotStart, end: s.slotEnd } : undefined,
   }));
-  downloadPdf(buildEvalSheetPdf(sheet, rows, layout), sheetFileName(sheet));
 }
 
 // The options modal goes inside the intranet dialog holding the clicked
@@ -154,43 +141,38 @@ async function handleRequest(requestId: string, sheet: EvalSheet): Promise<void>
   const students = sortStudents(sheet.students);
   // Started right away so photos are usually ready by the time the user has
   // gone through the options modal.
-  const photos = loadPhotos(students);
+  let loaded = 0;
+  let report: (() => void) | undefined;
+  const photos = loadPhotos(students, () => {
+    loaded++;
+    report?.();
+  });
   photos.catch(() => {});
   const presets = await loadPresets();
   const withSlots = students.some((s) => s.slotStart && s.slotEnd);
-  openEvalSheetModal(modalMountPoint(requestId), presets, withSlots, (layout) =>
-    generate(sheet, students, photos, layout),
-  );
-}
-
-window.addEventListener('message', (ev: MessageEvent) => {
-  if (ev.source !== window) return;
-  const data = ev.data as { source?: unknown; requestId?: unknown; sheet?: unknown } | null;
-  if (!data || data.source !== EVAL_SHEET_REQUEST || typeof data.requestId !== 'string') return;
-  if (document.documentElement.dataset.epitoolsEvalSheet !== 'on') return;
-  const { requestId, sheet } = data;
-  if (!isEvalSheet(sheet)) return; // no ack: the button shows "Échec"
-  handleRequest(requestId, sheet).then(
-    () => window.postMessage({ source: EVAL_SHEET_ACK, requestId }, location.origin),
-    () => {}, // context invalidated (stale tab): no ack, the button shows "Échec"
-  );
-});
-
-async function initFeatureToggle(): Promise<void> {
-  let stored: Record<string, unknown>;
-  try {
-    stored = await browser.storage.local.get({ [EVAL_SHEET_ENABLED_KEY]: EVAL_SHEET_ENABLED_DEFAULT });
-  } catch {
-    // "Extension context invalidated" in a tab that wasn't refreshed after
-    // an extension reload — see attendance.ts's initFeatureToggle.
-    return;
-  }
-  setEnabledFlag(stored[EVAL_SHEET_ENABLED_KEY] === true);
-
-  browser.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== 'local' || !(EVAL_SHEET_ENABLED_KEY in changes)) return;
-    setEnabledFlag(changes[EVAL_SHEET_ENABLED_KEY].newValue === true);
+  openEvalSheetModal(modalMountPoint(requestId), presets, withSlots, async (layout, progress) => {
+    report = () => progress(t('loadingPhotos', { done: loaded, total: students.length }));
+    if (loaded < students.length) report();
+    const rows = toSheetStudents(students, await photos);
+    report = undefined;
+    progress(t('building'));
+    // Let the label paint: building the PDF is synchronous.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    downloadPdf(buildEvalSheetPdf(sheet, rows, layout), sheetFileName(sheet));
   });
 }
 
-initFeatureToggle();
+export function init(): void {
+  window.addEventListener('message', (ev: MessageEvent) => {
+    if (ev.source !== window) return;
+    const data = ev.data as { source?: unknown; requestId?: unknown; sheet?: unknown } | null;
+    if (!data || data.source !== EVAL_SHEET_REQUEST || typeof data.requestId !== 'string') return;
+    if (!mirroredFlagOn(FLAGS.evalSheet)) return;
+    const { requestId, sheet } = data;
+    if (!isEvalSheet(sheet)) return; // no ack: the button shows its failure state
+    handleRequest(requestId, sheet).then(
+      () => window.postMessage({ source: EVAL_SHEET_ACK, requestId }, location.origin),
+      () => {}, // context invalidated (stale tab): no ack, the button shows its failure state
+    );
+  });
+}

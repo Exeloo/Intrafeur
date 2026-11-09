@@ -7,9 +7,8 @@
 //
 // Runs in the page's MAIN world (see event-info.ts for why): no browser.*
 // APIs and no webextension-polyfill here. The per-browser on/off toggle is
-// mirrored by eval-sheet.ts onto <html data-epitools-eval-sheet="on">.
+// mirrored onto <html data-epitools-eval-sheet="on"> (FLAGS.evalSheet).
 import {
-  extractPlanningEvent,
   findApiClient,
   findQueryClient,
   findSlotsList,
@@ -20,12 +19,14 @@ import {
   type SlotStudent,
 } from './fiber-extract';
 import { EVAL_SHEET_REQUEST, EVAL_SHEET_ACK, type EvalSheet, type EvalSheetStudent } from '../types';
+import { dialogEvent, dialogs, foldAccents, modalHeader } from './shared/mantine';
+import { button as makeButton, flashLabel, setBusy } from './shared/ui';
+import { datasetAttr, watchDom } from './shared/dom-watch';
+import { FLAGS, mirroredFlagOn } from '../settings';
+import { t } from '../i18n/eval-sheet-page';
 
 const BUTTON_CLASS = 'epitools-eval-sheet-btn';
 const SLOT_BUTTON_CLASS = 'epitools-eval-sheet-btn--slot';
-const BUTTON_LABEL = "Fiche d'évaluation";
-// Header button of a slot-based event: one sheet for every slot.
-const WHOLE_EVENT_LABEL = 'Fiche (tous les créneaux)';
 const FEEDBACK_MS = 2000;
 // Only the hand-off is timed: once the isolated script acks, the options
 // modal is open and the user may take as long as they like.
@@ -38,26 +39,8 @@ interface SlotGroup {
   students: SlotStudent[];
 }
 
-function isEnabled(): boolean {
-  return document.documentElement.dataset.epitoolsEvalSheet === 'on';
-}
-
 function normalize(text: string): string {
-  return text
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function findUnitLink(dialog: Element): HTMLAnchorElement | null {
-  return dialog.querySelector<HTMLAnchorElement>('a[href^="/units/"]');
-}
-
-function eventOf(dialog: Element): PlanningEvent | null {
-  const unitLink = findUnitLink(dialog);
-  return unitLink ? extractPlanningEvent(unitLink) : null;
+  return foldAccents(text).replace(/\s+/g, ' ').trim();
 }
 
 // --- Data gathering -------------------------------------------------------
@@ -166,7 +149,7 @@ async function toSheetStudents(
 
 const pending = new Map<string, (ok: boolean) => void>();
 
-window.addEventListener('message', (ev: MessageEvent) => {
+function onAck(ev: MessageEvent): void {
   if (ev.source !== window) return;
   const data = ev.data as { source?: unknown; requestId?: unknown; ok?: unknown } | null;
   if (!data || data.source !== EVAL_SHEET_ACK || typeof data.requestId !== 'string') return;
@@ -175,7 +158,7 @@ window.addEventListener('message', (ev: MessageEvent) => {
     pending.delete(data.requestId);
     resolve(true);
   }
-});
+}
 
 // Resolves true once the isolated script has opened the options modal.
 // The request id is also set on the button so that script can mount the
@@ -194,23 +177,11 @@ function requestPdf(button: HTMLButtonElement, sheet: EvalSheet): Promise<boolea
 
 // --- Buttons --------------------------------------------------------------
 
-function setLabel(button: HTMLButtonElement, label: string, resetAfterMs?: number): void {
-  button.textContent = label;
-  window.clearTimeout(Number(button.dataset.epitoolsTimer));
-  if (resetAfterMs) {
-    button.dataset.epitoolsTimer = String(
-      window.setTimeout(() => {
-        button.textContent = button.dataset.label || BUTTON_LABEL;
-      }, resetAfterMs),
-    );
-  }
-}
-
 // Re-reads everything on click rather than at injection time: React may
 // reuse the same modal DOM when the user opens another event.
 async function collectSheet(button: HTMLButtonElement): Promise<EvalSheet | null> {
   const dialog = button.closest('[role=dialog]');
-  const event = dialog ? eventOf(dialog) : null;
+  const event = dialog ? dialogEvent(dialog) : null;
   const qc = dialog ? findQueryClient(dialog) : null;
   if (!dialog || !event || !qc) return null;
 
@@ -266,10 +237,11 @@ async function collectSheet(button: HTMLButtonElement): Promise<EvalSheet | null
   };
 }
 
+// Busy (spinner, aria-busy) while the registrations and photos are gathered;
+// removeButtons() leaves a busy button alone.
 async function onClick(button: HTMLButtonElement): Promise<void> {
-  if (button.dataset.busy === '1') return;
-  button.dataset.busy = '1';
-  setLabel(button, 'Chargement…');
+  if (button.hasAttribute('aria-busy')) return;
+  const restore = setBusy(button);
   let ok = false;
   try {
     const sheet = await collectSheet(button);
@@ -277,18 +249,17 @@ async function onClick(button: HTMLButtonElement): Promise<void> {
   } catch {
     ok = false;
   }
-  delete button.dataset.busy;
-  if (ok) setLabel(button, button.dataset.label || BUTTON_LABEL);
-  else setLabel(button, 'Échec', FEEDBACK_MS);
+  restore();
+  if (!ok) {
+    button.textContent = button.dataset.label || t('button');
+    flashLabel(button, t('failed'), FEEDBACK_MS);
+  }
 }
 
-function buildButton(eventId: PlanningEvent['id'], slotKey?: string, label = BUTTON_LABEL): HTMLButtonElement {
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = slotKey ? `${BUTTON_CLASS} ${SLOT_BUTTON_CLASS}` : BUTTON_CLASS;
-  button.textContent = label;
+function buildButton(eventId: PlanningEvent['id'], slotKey?: string, label = t('button')): HTMLButtonElement {
+  const button = makeButton(label, slotKey ? `${BUTTON_CLASS} ${SLOT_BUTTON_CLASS}` : BUTTON_CLASS);
   button.dataset.label = label;
-  button.title = 'Télécharger la fiche d’évaluation (PDF)';
+  button.title = t('title');
   button.dataset.eventId = String(eventId);
   if (slotKey) button.dataset.slotKey = slotKey;
   button.addEventListener('click', (e) => {
@@ -378,10 +349,11 @@ function injectSlotButtons(dialog: Element, event: PlanningEvent): void {
 }
 
 function injectHeaderButton(dialog: Element, event: PlanningEvent): void {
-  const closeButton = dialog.querySelector<HTMLElement>('.mantine-Modal-close');
-  const header = closeButton?.parentElement;
-  if (!closeButton || !header) return;
-  const label = event.activitySlotsEnabled ? WHOLE_EVENT_LABEL : BUTTON_LABEL;
+  const slot = modalHeader(dialog);
+  if (!slot) return;
+  const { close: closeButton, header } = slot;
+  // Header button of a slot-based event: one sheet for every slot.
+  const label = event.activitySlotsEnabled ? t('wholeEvent') : t('button');
   const existing = header.querySelector<HTMLButtonElement>(`:scope > .${BUTTON_CLASS}`);
   if (existing && existing.dataset.eventId === String(event.id) && existing.dataset.label === label) return;
   existing?.remove();
@@ -390,48 +362,37 @@ function injectHeaderButton(dialog: Element, event: PlanningEvent): void {
 
 function removeButtons(root: ParentNode, selector = `.${BUTTON_CLASS}`): void {
   for (const el of Array.from(root.querySelectorAll(selector))) {
-    if (!(el as HTMLElement).dataset.busy) el.remove();
+    if (!el.hasAttribute('aria-busy')) el.remove();
   }
 }
 
+// findSlotsList walks up to 20000 fibers: only redo the slot buttons when
+// the modal's content changed (slot matching is content-based anyway).
+const slotSignatures = new WeakMap<Element, string>();
+
 function check(): void {
-  if (!isEnabled()) {
+  if (!mirroredFlagOn(FLAGS.evalSheet)) {
     removeButtons(document);
     return;
   }
-  for (const dialog of Array.from(document.querySelectorAll('section[role=dialog]'))) {
-    const event = eventOf(dialog);
+  for (const dialog of dialogs()) {
+    const event = dialogEvent(dialog);
     if (!event) continue;
+    injectHeaderButton(dialog, event);
     if (event.activitySlotsEnabled) {
       // Whole event (every slot, times in a left column) + one per slot.
-      injectHeaderButton(dialog, event);
+      const signature = () => `${event.id}|${dialog.textContent}`;
+      if (slotSignatures.get(dialog) === signature()) continue;
       injectSlotButtons(dialog, event);
+      slotSignatures.set(dialog, signature());
     } else {
       removeButtons(dialog, `.${SLOT_BUTTON_CLASS}`);
-      injectHeaderButton(dialog, event);
     }
   }
 }
 
-let debounceTimer: number | undefined;
-
-// Throttled, not debounced: run 150 ms after the first mutation and ignore
-// the next ones until then. The site rewrites its <style> tags every ~100 ms
-// on some views (e.g. planning with several semesters selected), so a
-// debounce that restarts on every mutation would starve check() forever.
-function scheduleCheck(): void {
-  if (debounceTimer !== undefined) return;
-  debounceTimer = window.setTimeout(() => {
-    debounceTimer = undefined;
-    check();
-  }, 150);
+export function init(): void {
+  window.addEventListener('message', onAck);
+  // The popup toggle flips the mirrored attribute without any body mutation.
+  watchDom(check, { htmlAttributes: [datasetAttr(FLAGS.evalSheet.mirror)] });
 }
-
-new MutationObserver(scheduleCheck).observe(document.body, { childList: true, subtree: true });
-// The popup toggle flips this attribute (via eval-sheet.ts) without any
-// body mutation; watch it so enabling/disabling applies live.
-new MutationObserver(scheduleCheck).observe(document.documentElement, {
-  attributes: true,
-  attributeFilter: ['data-epitools-eval-sheet'],
-});
-check();

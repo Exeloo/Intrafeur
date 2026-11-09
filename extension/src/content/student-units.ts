@@ -13,8 +13,16 @@
 // The tab is a deep clone of a native tab button (no React fiber/listeners).
 // While it's open the site's tab content is hidden by CSS (never removed:
 // React owns it) and our panel is shown after it; clicking any native tab
-// closes it. MAIN world, so no browser.* and no popup toggle.
+// closes it. MAIN world, so no browser.*; the toggle is mirrored onto
+// <html data-epitools-student-units="on"> (FLAGS.studentUnits). Student data
+// stays in memory only.
 import { findApiClient, type ApiClientLike, type UnitInstance, type UnitStudent } from './fiber-extract';
+import { cloneButton, setButtonLabel } from './shared/mantine';
+import { el, errorText, spinner } from './shared/ui';
+import { datasetAttr, watchDom } from './shared/dom-watch';
+import { FLAGS, mirroredFlagOn } from '../settings';
+import { currentLocale, LANG_DATASET_KEY } from '../i18n/core';
+import { t } from '../i18n/student-units';
 
 const TAB_ATTR = 'data-epitools-units-tab';
 const PANEL_ATTR = 'data-epitools-units-panel';
@@ -43,6 +51,9 @@ interface Result {
 }
 
 const cache = new Map<string, Promise<Result>>();
+// Where an in-flight fetch reports its progress: the latest panel opened for
+// that key (the tab can be closed and reopened while it runs).
+const progressOf = new Map<string, (done: number, total: number) => void>();
 let openLogin: string | null = null;
 let year = defaultSchoolYear();
 
@@ -140,13 +151,6 @@ async function fetchUnits(
 
 // --- Panel (the site's Mantine markup, captured live) ---
 
-function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
-
 function stack(gap: string): HTMLElement {
   const node = el('div', 'm_6d731127 mantine-Stack-root');
   node.setAttribute('style', `--stack-gap: var(--mantine-spacing-${gap}); --stack-align: stretch; --stack-justify: flex-start;`);
@@ -194,7 +198,7 @@ function codeBadge(code: string, color: string): HTMLElement {
 
 function formatDate(iso?: string | null): string {
   const date = iso ? new Date(iso) : null;
-  return date && !Number.isNaN(date.getTime()) ? date.toLocaleDateString() : '–';
+  return date && !Number.isNaN(date.getTime()) ? date.toLocaleDateString(currentLocale()) : '–';
 }
 
 function unitTable(units: UnitInstance[], color: string): HTMLElement {
@@ -216,8 +220,8 @@ function unitTable(units: UnitInstance[], color: string): HTMLElement {
   const thead = table.createTHead();
   thead.className = 'm_b242d975 mantine-Table-thead';
   const head = row(thead, -1);
-  for (const label of ['Code', 'Name', 'Instance', 'Start', 'End', 'Students']) {
-    head.appendChild(el('th', 'm_4e7aa4f3 mantine-Table-th', label));
+  for (const label of ['colCode', 'colName', 'colInstance', 'colStart', 'colEnd', 'colStudents'] as const) {
+    head.appendChild(el('th', 'm_4e7aa4f3 mantine-Table-th', t(label)));
   }
   const tbody = table.createTBody();
   tbody.className = 'm_b2404537 mantine-Table-tbody';
@@ -255,40 +259,44 @@ function section(heading: string, units: UnitInstance[], empty: string, color: s
 function renderResult(body: HTMLElement, result: Result): void {
   body.replaceChildren();
   if (result.failed) {
-    const warning = text(`${result.failed} unit(s) could not be checked; the lists may be incomplete.`);
+    const warning = text(t('failed', { count: result.failed }));
     warning.style.color = 'var(--mantine-color-red-6)';
     body.appendChild(warning);
   }
-  body.appendChild(section('Registered units', result.registered, 'No unit registration found for this school year.', 'blue'));
+  body.appendChild(section(t('registered'), result.registered, t('noRegistration'), 'blue'));
   body.appendChild(
     result.missing
       ? section(
-          `Not registered${result.semester ? ` · ${result.semester}` : ''}`,
+          result.semester ? t('notRegisteredSemester', { semester: result.semester }) : t('notRegistered'),
           result.missing,
-          'Registered to every unit of their semester.',
+          t('allRegistered'),
           'orange',
         )
-      : text("The student's semester is unknown, so units they're missing can't be listed.", true),
+      : text(t('semesterUnknown'), true),
   );
 }
 
 function load(panel: HTMLElement, login: string): void {
   const body = panel.querySelector<HTMLElement>('[data-epitools-units-body]')!;
   const key = `${login}|${year}`;
-  const status = text('Loading units…', true);
+  const loader = spinner(t('loading'));
+  const progress = loader.querySelector('.epitools-loading-label')!;
+  const status = text('', true);
+  status.appendChild(loader);
   body.replaceChildren(status);
+  progressOf.set(key, (done, total) => {
+    if (progress.isConnected) progress.textContent = t('checking', { done, total });
+  });
   let promise = cache.get(key);
   if (!promise) {
     const api = findApiClient(panel.previousElementSibling ?? panel);
     if (typeof api?.units?.getAllUnitInstances !== 'function' || typeof api.units.getRegistrations !== 'function') {
-      status.textContent = 'Could not find the intranet API on this page.';
+      status.textContent = t('noApi');
       return;
     }
-    promise = fetchUnits(api, login, year, (done, total) => {
-      if (status.isConnected) status.textContent = `Checking units… ${done}/${total}`;
-    });
+    promise = fetchUnits(api, login, year, (done, total) => progressOf.get(key)?.(done, total));
     cache.set(key, promise);
-    promise.catch(() => cache.delete(key));
+    promise.catch(() => cache.delete(key)).finally(() => progressOf.delete(key));
   }
   promise.then(
     (result) => {
@@ -297,7 +305,7 @@ function load(panel: HTMLElement, login: string): void {
     },
     (err) => {
       if (panel.dataset.epitoolsKey !== key) return;
-      status.textContent = `Could not load units: ${err instanceof Error ? err.message : String(err)}`;
+      status.textContent = t('loadFailed', { error: errorText(err) });
     },
   );
 }
@@ -313,7 +321,7 @@ function buildPanel(login: string): HTMLElement {
   wrapper.dataset.variant = 'default';
   const select = el('select', 'm_8fb7ebe7 mantine-Input-input');
   select.dataset.variant = 'default';
-  select.setAttribute('aria-label', 'School year');
+  select.setAttribute('aria-label', t('schoolYear'));
   const current = defaultSchoolYear();
   for (let y = current + 1; y >= current - 5; y--) {
     const option = el('option', undefined, `${y}-${y + 1}`);
@@ -327,7 +335,7 @@ function buildPanel(login: string): HTMLElement {
     load(panel, login);
   });
   wrapper.appendChild(select);
-  header.append(title('Units', 2), wrapper);
+  header.append(title(t('tab'), 2), wrapper);
 
   const body = stack('xl');
   body.setAttribute('data-epitools-units-body', '');
@@ -339,21 +347,9 @@ function buildPanel(login: string): HTMLElement {
 // --- Tab ---
 
 function buildTab(template: HTMLElement): HTMLElement {
-  const tab = template.cloneNode(true) as HTMLElement;
+  const tab = cloneButton(template, TAB_ATTR, { paths: ICON_PATHS });
   tab.removeAttribute('aria-current');
-  tab.setAttribute(TAB_ATTR, '');
-  const label = tab.querySelector('span');
-  if (label) label.textContent = 'Units';
-  const svg = tab.querySelector('svg');
-  if (svg) {
-    svg.replaceChildren(
-      ...ICON_PATHS.map((d) => {
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        path.setAttribute('d', d);
-        return path;
-      }),
-    );
-  }
+  setButtonLabel(tab, t('tab'), 'span');
   tab.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -371,14 +367,17 @@ function close(): void {
 }
 
 function check(): void {
-  const login = pageLogin();
+  const login = mirroredFlagOn(FLAGS.studentUnits) ? pageLogin() : null;
   const bar = login ? findTabBar() : null;
   if (!login || !bar) {
-    document.querySelectorAll(`[${TAB_ATTR}]`).forEach((t) => t.remove());
+    document.querySelectorAll(`[${TAB_ATTR}]`).forEach((n) => n.remove());
     if (openLogin) close();
     return;
   }
-  if (!bar.querySelector(`:scope > [${TAB_ATTR}]`)) {
+  const tab = bar.querySelector<HTMLElement>(`:scope > [${TAB_ATTR}]`);
+  // The tab can be built before the isolated bundle writes the language.
+  if (tab) setButtonLabel(tab, t('tab'), 'span');
+  else {
     const template = bar.querySelector<HTMLElement>(':scope > button:not([aria-current])');
     if (template) bar.appendChild(buildTab(template));
   }
@@ -394,7 +393,7 @@ function check(): void {
     panel.remove();
     panel = null;
   }
-  document.documentElement.setAttribute(OPEN_ATTR, '');
+  if (!document.documentElement.hasAttribute(OPEN_ATTR)) document.documentElement.setAttribute(OPEN_ATTR, '');
   if (!content.hasAttribute(HIDDEN_ATTR)) content.setAttribute(HIDDEN_ATTR, '');
   if (!panel) {
     panel = buildPanel(login);
@@ -403,28 +402,18 @@ function check(): void {
   }
 }
 
-// A native tab (desktop bar or mobile section select) closes ours.
-document.addEventListener(
-  'click',
-  (e) => {
-    if (!openLogin) return;
-    const button = (e.target as Element | null)?.closest?.('button');
-    if (button && !button.hasAttribute(TAB_ATTR) && button.parentElement === findTabBar()) close();
-  },
-  true,
-);
-window.addEventListener('hashchange', () => openLogin && close());
-
-let checkTimer: number | undefined;
-
-// Throttled, not debounced (see event-info.ts).
-function scheduleCheck(): void {
-  if (checkTimer !== undefined) return;
-  checkTimer = window.setTimeout(() => {
-    checkTimer = undefined;
-    check();
-  }, 150);
+export function init(): void {
+  // A native tab (desktop bar or mobile section select) closes ours.
+  document.addEventListener(
+    'click',
+    (e) => {
+      if (!openLogin) return;
+      const button = (e.target as Element | null)?.closest?.('button');
+      if (button && !button.hasAttribute(TAB_ATTR) && button.parentElement === findTabBar()) close();
+    },
+    true,
+  );
+  window.addEventListener('hashchange', () => openLogin && close());
+  // The popup toggle flips the mirrored attribute without any body mutation.
+  watchDom(check, { htmlAttributes: [datasetAttr(FLAGS.studentUnits.mirror), datasetAttr(LANG_DATASET_KEY)] });
 }
-
-new MutationObserver(scheduleCheck).observe(document.body, { childList: true, subtree: true });
-check();

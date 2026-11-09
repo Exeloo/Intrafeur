@@ -21,7 +21,6 @@ import {
   setResetButtonVisible,
   removeUnitFiltersToolbar,
   waitFor,
-  showClearFilterWarning,
   showTableLoader,
   hideTableLoader,
 } from './unit-filters-dom';
@@ -31,11 +30,13 @@ import {
   UNIT_FILTER_PRESETS_KEY,
   UNIT_FILTER_SELECTED_KEY,
   UNIT_FILTER_DEFAULT_PRESET_ID,
-  UNIT_FILTER_DEFAULT_PRESET_NAME,
   UNIT_FILTER_DEFAULT_COLUMNS,
-  UNIT_FILTERS_ENABLED_KEY,
-  UNIT_FILTERS_ENABLED_DEFAULT,
 } from '../types';
+import { FLAGS } from '../settings';
+import { t } from '../i18n/unit-filters';
+import { watchDom } from './shared/dom-watch';
+import { getLocal, onLocalChange, watchFlag } from './shared/ext-storage';
+import { errorText, toast } from './shared/ui';
 
 const COLUMN_KEYS: ColumnKey[] = ['name', 'semester', 'campus', 'startDate', 'endDate', 'registrations'];
 
@@ -50,16 +51,19 @@ let toolbarButtonsShown: boolean | null = null;
 
 function allPresetsForDisplay(): { id: string; name: string }[] {
   return [
-    { id: UNIT_FILTER_DEFAULT_PRESET_ID, name: UNIT_FILTER_DEFAULT_PRESET_NAME },
+    { id: UNIT_FILTER_DEFAULT_PRESET_ID, name: t('defaultPreset') },
     ...state.presets.map((p) => ({ id: p.id, name: p.name })),
   ];
 }
 
+// The built-in Default is synthesized (never stored); its name is translated at display.
 function getPresetById(id: string): UnitFilterPreset {
-  if (id === UNIT_FILTER_DEFAULT_PRESET_ID) {
-    return { id: UNIT_FILTER_DEFAULT_PRESET_ID, name: UNIT_FILTER_DEFAULT_PRESET_NAME, columns: UNIT_FILTER_DEFAULT_COLUMNS };
-  }
-  return state.presets.find((p) => p.id === id) ?? { id, name: UNIT_FILTER_DEFAULT_PRESET_NAME, columns: UNIT_FILTER_DEFAULT_COLUMNS };
+  const preset = id === UNIT_FILTER_DEFAULT_PRESET_ID ? undefined : state.presets.find((p) => p.id === id);
+  return preset ?? { id, name: t('defaultPreset'), columns: UNIT_FILTER_DEFAULT_COLUMNS };
+}
+
+function rebuildToolbarOptions(): void {
+  if (toolbarEl) rebuildPresetOptions(toolbarEl, allPresetsForDisplay(), state.selectedPresetId);
 }
 
 function captureCurrentState(): UnitFilterColumns | null {
@@ -146,7 +150,7 @@ async function applyColumnsOnly(columns: UnitFilterColumns): Promise<void> {
     }
     if (pending.length === 0) return;
 
-    if (willHitClearBug && toolbarEl) showClearFilterWarning(toolbarEl);
+    if (willHitClearBug) toast(t('clearBug'), 'info');
 
     if (!isFilterRowToggledOn(paper)) toggleFilterRow(paper);
 
@@ -195,12 +199,17 @@ async function applyPreset(id: string): Promise<void> {
   state.selectedPresetId = id;
   await browser.storage.local.set({ [UNIT_FILTER_SELECTED_KEY]: id });
   await applyColumnsReliably(getPresetById(id).columns);
-  if (toolbarEl) rebuildPresetOptions(toolbarEl, allPresetsForDisplay(), state.selectedPresetId);
+  rebuildToolbarOptions();
   recomputeSaveButtonVisibility();
 }
 
+function reportApplyError(err: unknown): void {
+  console.error('[Intrafeur] failed to apply unit filter preset', err);
+  toast(t('applyFailed', { error: errorText(err) }), 'error');
+}
+
 function onSelectPreset(id: string): void {
-  applyPreset(id).catch((err) => console.error('[Epitools] failed to apply unit filter preset', err));
+  applyPreset(id).catch(reportApplyError);
 }
 
 function onSaveButtonClick(): void {
@@ -208,8 +217,8 @@ function onSaveButtonClick(): void {
   openSaveFilterModal({
     currentPresetName: selected.name,
     isDefaultSelected: state.selectedPresetId === UNIT_FILTER_DEFAULT_PRESET_ID,
-    onConfirm: (choice) => onSaveModalConfirm(choice),
-    onCancel: () => {},
+    onConfirm: (choice) =>
+      onSaveModalConfirm(choice).catch((err) => toast(t('saveFailed', { error: errorText(err) }), 'error')),
   });
 }
 
@@ -231,7 +240,7 @@ async function onSaveModalConfirm(choice: SaveFilterChoice): Promise<void> {
     [UNIT_FILTER_SELECTED_KEY]: state.selectedPresetId,
   });
 
-  if (toolbarEl) rebuildPresetOptions(toolbarEl, allPresetsForDisplay(), state.selectedPresetId);
+  rebuildToolbarOptions();
   recomputeSaveButtonVisibility();
 }
 
@@ -253,7 +262,7 @@ function recomputeSaveButtonVisibility(): void {
 function onResetButtonClick(): void {
   applyColumnsReliably(getPresetById(state.selectedPresetId).columns)
     .then(() => recomputeSaveButtonVisibility())
-    .catch((err) => console.error('[Epitools] failed to reset unit filters', err));
+    .catch(reportApplyError);
 }
 
 function normalizedPathname(): string {
@@ -269,9 +278,6 @@ function teardown(): void {
 }
 
 function check(): void {
-  // A disabled toggle stops the observer, but a debounced check may still
-  // be queued.
-  if (!bodyObserver) return;
   if (normalizedPathname() !== '/units/my') {
     if (toolbarEl) teardown();
     return;
@@ -290,7 +296,7 @@ function check(): void {
         onSave: onSaveButtonClick,
         onReset: onResetButtonClick,
       }) ?? null;
-    if (toolbarEl) rebuildPresetOptions(toolbarEl, allPresetsForDisplay(), state.selectedPresetId);
+    rebuildToolbarOptions();
   }
 
   if (paper !== activePaper) {
@@ -299,44 +305,25 @@ function check(): void {
     // navigating away and back) resets MRT's own filter state — restore
     // whatever preset is currently selected so it doesn't silently drift
     // back to blank. Never triggers a navigation itself.
-    applyColumnsReliably(getPresetById(state.selectedPresetId).columns).catch((err) =>
-      console.error('[Epitools] failed to reapply unit filter preset', err),
-    );
+    applyColumnsReliably(getPresetById(state.selectedPresetId).columns).catch(reportApplyError);
   }
 
   recomputeSaveButtonVisibility();
 }
 
-let scheduled = false;
-// setTimeout, not requestAnimationFrame — rAF callbacks are tied to the
-// paint cycle and get throttled to a crawl (multi-second gaps) whenever
-// this tab isn't the focused/foreground one, confirmed live: it silently
-// stalled the whole reapply-on-remount flow for 10+ seconds. A user who
-// reloads the page and switches tabs while it loads would hit the same
-// stall, not just automation.
-function scheduleCheck(): void {
-  if (scheduled) return;
-  scheduled = true;
-  setTimeout(() => {
-    scheduled = false;
-    check();
-  });
-}
-
-let bodyObserver: MutationObserver | null = null;
+let stopDom: (() => void) | null = null;
 
 function startWatching(): void {
-  if (bodyObserver) return;
-  bodyObserver = new MutationObserver(scheduleCheck);
-  bodyObserver.observe(document.body, { childList: true, subtree: true });
+  if (stopDom) return;
+  // delay 0: setTimeout, never rAF — rAF is throttled to a crawl in
+  // unfocused tabs and stalled the reapply-on-remount flow for 10+ s.
+  stopDom = watchDom(check, { delay: 0 });
   // Typing in the text filters and picking a combobox option don't reliably
   // surface through a body-level MutationObserver alone (React-controlled
   // value changes aren't always DOM mutations the observer sees) — these
-  // two delegated listeners catch both cases. Cheap and idempotent, so
-  // blanket-attaching rather than scoping precisely is safe.
+  // two delegated listeners catch both cases. Cheap and idempotent.
   document.addEventListener('input', onDocumentInput, true);
   document.addEventListener('click', onDocumentClick, true);
-  check();
 }
 
 function onDocumentInput(): void {
@@ -350,52 +337,36 @@ function onDocumentClick(): void {
 // Leaves the table's current filter values as they are: they're the site's
 // own state, and clearing Semester/Campus would hit the MRT desync bug.
 function stopWatching(): void {
-  bodyObserver?.disconnect();
-  bodyObserver = null;
+  stopDom?.();
+  stopDom = null;
   document.removeEventListener('input', onDocumentInput, true);
   document.removeEventListener('click', onDocumentClick, true);
   teardown();
 }
 
-async function loadPresets(): Promise<void> {
-  const stored = await browser.storage.local.get({
-    [UNIT_FILTER_PRESETS_KEY]: [] as UnitFilterPreset[],
-    [UNIT_FILTER_SELECTED_KEY]: UNIT_FILTER_DEFAULT_PRESET_ID,
-  });
-  state.presets = (stored[UNIT_FILTER_PRESETS_KEY] as UnitFilterPreset[]) || [];
-  state.selectedPresetId = (stored[UNIT_FILTER_SELECTED_KEY] as string) || UNIT_FILTER_DEFAULT_PRESET_ID;
+function readPresets(value: unknown): UnitFilterPreset[] {
+  return Array.isArray(value) ? (value as UnitFilterPreset[]) : [];
 }
 
-browser.storage.onChanged.addListener((changes, area) => {
-  if (area !== 'local') return;
-  if (UNIT_FILTER_PRESETS_KEY in changes) {
-    state.presets = (changes[UNIT_FILTER_PRESETS_KEY].newValue as UnitFilterPreset[]) || [];
-    if (toolbarEl) rebuildPresetOptions(toolbarEl, allPresetsForDisplay(), state.selectedPresetId);
-  }
-  if (UNIT_FILTER_SELECTED_KEY in changes) {
-    state.selectedPresetId = (changes[UNIT_FILTER_SELECTED_KEY].newValue as string) || UNIT_FILTER_DEFAULT_PRESET_ID;
-    if (toolbarEl) rebuildPresetOptions(toolbarEl, allPresetsForDisplay(), state.selectedPresetId);
-    recomputeSaveButtonVisibility();
-  }
-});
-
-async function init(): Promise<void> {
-  let stored: Record<string, unknown>;
-  try {
-    await loadPresets();
-    stored = await browser.storage.local.get({ [UNIT_FILTERS_ENABLED_KEY]: UNIT_FILTERS_ENABLED_DEFAULT });
-  } catch {
-    // "Extension context invalidated" in a tab that wasn't refreshed after
-    // an extension reload — see attendance.ts's initFeatureToggle.
-    return;
-  }
-  if (stored[UNIT_FILTERS_ENABLED_KEY] !== false) startWatching();
-
-  browser.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== 'local' || !(UNIT_FILTERS_ENABLED_KEY in changes)) return;
-    if (changes[UNIT_FILTERS_ENABLED_KEY].newValue !== false) startWatching();
-    else stopWatching();
-  });
+function readSelected(value: unknown): string {
+  return typeof value === 'string' && value ? value : UNIT_FILTER_DEFAULT_PRESET_ID;
 }
 
-init();
+export async function init(): Promise<void> {
+  const stored = await getLocal({
+    [UNIT_FILTER_PRESETS_KEY]: [] as unknown,
+    [UNIT_FILTER_SELECTED_KEY]: UNIT_FILTER_DEFAULT_PRESET_ID as unknown,
+  });
+  if (!stored) return; // extension context invalidated (stale tab)
+  state.presets = readPresets(stored[UNIT_FILTER_PRESETS_KEY]);
+  state.selectedPresetId = readSelected(stored[UNIT_FILTER_SELECTED_KEY]);
+
+  onLocalChange([UNIT_FILTER_PRESETS_KEY, UNIT_FILTER_SELECTED_KEY], (changed) => {
+    if (UNIT_FILTER_PRESETS_KEY in changed) state.presets = readPresets(changed[UNIT_FILTER_PRESETS_KEY]);
+    if (UNIT_FILTER_SELECTED_KEY in changed) state.selectedPresetId = readSelected(changed[UNIT_FILTER_SELECTED_KEY]);
+    rebuildToolbarOptions();
+    if (UNIT_FILTER_SELECTED_KEY in changed) recomputeSaveButtonVisibility();
+  });
+
+  await watchFlag(FLAGS.unitFilters, (enabled) => (enabled ? startWatching() : stopWatching()));
+}

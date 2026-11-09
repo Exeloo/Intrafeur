@@ -1,0 +1,95 @@
+/* Generic classes from content/shared/ui.ts (both worlds). */
+
+/* Loader */
+.epitools-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.epitools-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: epitools-spin 0.7s linear infinite;
+}
+
+@keyframes epitools-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .epitools-spinner {
+    animation-duration: 2s;
+  }
+}
+
+/* Busy button: keeps its label, adds a spinner after it. */
+.epitools-busy {
+  cursor: progress !important;
+}
+
+.epitools-busy::after {
+  content: '';
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-left: 6px;
+  vertical-align: -1px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: epitools-spin 0.7s linear infinite;
+}
+
+/* Toast */
+.epitools-toast {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 1000001;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 420px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: #1e1e1e;
+  color: #e6e6e6;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  font-size: 13px;
+}
+
+.epitools-toast--success {
+  border-color: #2fb344;
+}
+
+.epitools-toast--error {
+  border-color: #ff6b6b;
+}
+
+.epitools-toast button {
+  background: #2a2a2a;
+  color: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.epitools-toast .epitools-toast-close {
+  border: none;
+  background: none;
+  font-size: 16px;
+  padding: 0 2px;
+}

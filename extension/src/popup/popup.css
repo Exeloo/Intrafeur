@@ -1,48 +1,39 @@
-body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: #121212;
-  color: #eee;
-  margin: 0;
-  width: 280px;
+/* Popup layout; shared tokens/components are in ../ui/pages.css. */
+body.popup {
+  width: 360px;
+  max-height: 580px;
 }
 
-main {
-  padding: 16px;
+.popup-header {
+  padding: 14px 14px 8px;
 }
 
-h1 {
+.popup-title {
   font-size: 15px;
-  margin: 0 0 14px;
 }
 
-.toggle-row {
+.version {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.popup-subtitle {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+#features {
+  padding: 0 14px;
+}
+
+.popup .flag {
+  padding: 10px 12px;
+}
+
+.popup-footer {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.toggle-row input {
-  width: 16px;
-  height: 16px;
-  cursor: pointer;
-}
-
-.hint {
-  opacity: 0.65;
-  font-size: 12px;
-  line-height: 1.5;
-  margin: 10px 0 14px;
-}
-
-a {
-  display: inline-block;
-  font-size: 12px;
-  color: #6ea8fe;
-  text-decoration: none;
-}
-
-a:hover {
-  text-decoration: underline;
+  justify-content: space-between;
+  padding: 10px 14px 14px;
 }

@@ -1,27 +1,30 @@
-// Pulls the underlying row data (email/firstname/lastname) that Mantine
-// React Table holds in React state, straight off the DOM node. This is a
-// defensive fallback only: the current page renders the email as plain text
-// (see attendance.ts), but this covers a future redesign that removes that.
-//
-// React attaches an internal fiber to each DOM node under a key like
-// "__reactFiber$<random>" (the random suffix changes per build/session), so
-// we find it by prefix rather than by exact name. From there we walk up and
-// down a few levels looking for a TanStack/MRT `row.original` object.
+// React fiber access. React attaches an internal fiber to each DOM node
+// under a key like "__reactFiber$<random>" (the suffix changes per
+// build/session), so it's found by prefix. Everything but extractRowOriginal
+// only works from the page's MAIN world: an isolated-world content script
+// can't see those expandos.
 
-interface FiberNode {
-  memoizedProps?: {
-    row?: { original?: unknown };
-    original?: unknown;
-  };
-  child?: FiberNode | null;
-  return?: FiberNode | null;
+/** The slice of a React fiber we read. */
+export interface Fiber {
+  key?: string | null;
+  memoizedProps?: Record<string, unknown> | null;
+  memoizedState?: Hook | null;
+  dependencies?: { firstContext?: ContextDependency | null } | null;
+  return?: Fiber | null;
+  child?: Fiber | null;
+  sibling?: Fiber | null;
+  stateNode?: unknown;
 }
 
-export interface RowOriginal {
-  login?: string;
-  firstname?: string;
-  lastname?: string;
-  [key: string]: unknown;
+/** A function component's hook list entry (fiber.memoizedState chain). */
+export interface Hook {
+  memoizedState?: unknown;
+  next?: Hook | null;
+}
+
+interface ContextDependency {
+  memoizedValue?: unknown;
+  next?: ContextDependency | null;
 }
 
 export function findFiberKey(domNode: Element): string | undefined {
@@ -30,22 +33,37 @@ export function findFiberKey(domNode: Element): string | undefined {
   );
 }
 
-export function extractRowOriginal(trElement: Element, maxDepth = 25): RowOriginal | null {
-  const fiberKey = findFiberKey(trElement);
-  if (!fiberKey) return null;
+export function fiberOf(domNode: Element): Fiber | null | undefined {
+  const key = findFiberKey(domNode);
+  return key ? (domNode as unknown as Record<string, Fiber>)[key] : null;
+}
 
-  const rootFiber = (trElement as unknown as Record<string, FiberNode>)[fiberKey];
-  const visited = new Set<FiberNode>();
+// Mantine React Table keeps the row data (email/firstname/lastname) in a
+// TanStack/MRT `row.original`. Defensive fallback only: the current page
+// renders the email as plain text (see attendance.ts), but this covers a
+// future redesign that removes that. Walks up and down a few levels.
+export interface RowOriginal {
+  login?: string;
+  firstname?: string;
+  lastname?: string;
+  [key: string]: unknown;
+}
+
+export function extractRowOriginal(trElement: Element, maxDepth = 25): RowOriginal | null {
+  const rootFiber = fiberOf(trElement);
+  if (!rootFiber) return null;
+  const visited = new Set<Fiber>();
   let result: RowOriginal | null = null;
 
-  function search(fiber: FiberNode | null | undefined, depth: number): void {
+  function search(fiber: Fiber | null | undefined, depth: number): void {
     if (!fiber || depth > maxDepth || result || visited.has(fiber)) return;
     visited.add(fiber);
 
     const props = fiber.memoizedProps;
     if (props && typeof props === 'object') {
-      if (props.row && props.row.original) {
-        result = props.row.original as RowOriginal;
+      const row = props.row as { original?: unknown } | null | undefined;
+      if (row && row.original) {
+        result = row.original as RowOriginal;
         return;
       }
       if (props.original && typeof props.original === 'object') {
@@ -69,8 +87,6 @@ export function extractRowOriginal(trElement: Element, maxDepth = 25): RowOrigin
 // (e.g. projectInstanceId), so we walk up from any element inside the modal
 // until we meet an `event` prop of the right shape.
 //
-// Only works from the page's MAIN world: an isolated-world content script
-// can't see the "__reactFiber$..." expandos React sets on DOM nodes.
 export interface PlanningEvent {
   id: string | number;
   fullTitle?: string | null;
@@ -85,11 +101,6 @@ export interface PlanningEvent {
   rooms?: { name?: string | null }[] | null;
 }
 
-interface EventFiberNode {
-  memoizedProps?: { event?: unknown } | null;
-  return?: EventFiberNode | null;
-}
-
 function isPlanningEvent(value: unknown): value is PlanningEvent {
   return (
     !!value &&
@@ -101,10 +112,7 @@ function isPlanningEvent(value: unknown): value is PlanningEvent {
 }
 
 export function extractPlanningEvent(domNode: Element, maxDepth = 40): PlanningEvent | null {
-  const fiberKey = findFiberKey(domNode);
-  if (!fiberKey) return null;
-
-  let fiber: EventFiberNode | null | undefined = (domNode as unknown as Record<string, EventFiberNode>)[fiberKey];
+  let fiber = fiberOf(domNode);
   for (let depth = 0; fiber && depth <= maxDepth; depth++, fiber = fiber.return) {
     const event = fiber.memoizedProps?.event;
     if (isPlanningEvent(event)) return event;
@@ -112,7 +120,7 @@ export function extractPlanningEvent(domNode: Element, maxDepth = 40): PlanningE
   return null;
 }
 
-// --- Evaluation sheet helpers (MAIN world only, same reason as above) ---
+// --- Site singletons: React Query client and API client ---
 
 // Minimal slice of TanStack Query's QueryClient that we rely on. The site
 // keeps most fetched resources in it (registrations, slots), so we read from
@@ -184,32 +192,28 @@ export interface QueryClientLike {
   };
 }
 
-interface ContextDependency {
-  memoizedValue?: unknown;
-  next?: ContextDependency | null;
-}
+// Both lookups walk up to 1000 fibers, and absence-status runs them from
+// every card on every check: positive results are cached per start element
+// (re-validated on use; misses aren't cached, the fiber may not be mounted yet).
+const queryClients = new WeakMap<Element, QueryClientLike>();
+const apiClients = new WeakMap<Element, ApiClientLike>();
 
-interface GenericFiberNode {
-  memoizedProps?: Record<string, unknown> | null;
-  dependencies?: { firstContext?: ContextDependency | null } | null;
-  return?: GenericFiberNode | null;
-  child?: GenericFiberNode | null;
-  sibling?: GenericFiberNode | null;
-  stateNode?: unknown;
-}
-
-function fiberOf(domNode: Element): GenericFiberNode | null {
-  const key = findFiberKey(domNode);
-  return key ? (domNode as unknown as Record<string, GenericFiberNode>)[key] : null;
+function isQueryClient(value: unknown): value is QueryClientLike {
+  return !!value && typeof (value as { getQueryCache?: unknown }).getQueryCache === 'function';
 }
 
 // Verified live: the QueryClientProvider (props.client) sits a few hundred
 // fibers above the planning modal.
 export function findQueryClient(domNode: Element, maxDepth = 1000): QueryClientLike | null {
-  let fiber: GenericFiberNode | null | undefined = fiberOf(domNode);
+  const cached = queryClients.get(domNode);
+  if (isQueryClient(cached)) return cached;
+  let fiber = fiberOf(domNode);
   for (let depth = 0; fiber && depth <= maxDepth; depth++, fiber = fiber.return) {
-    const client = fiber.memoizedProps?.client as { getQueryCache?: unknown } | undefined;
-    if (client && typeof client.getQueryCache === 'function') return client as unknown as QueryClientLike;
+    const client = fiber.memoizedProps?.client;
+    if (isQueryClient(client)) {
+      queryClients.set(domNode, client);
+      return client;
+    }
   }
   return null;
 }
@@ -228,10 +232,15 @@ function isApiClient(value: unknown): value is ApiClientLike {
 // fibers above the planning modal. The site doesn't load student avatars in
 // that modal itself, so this is the only authenticated way to get them.
 export function findApiClient(domNode: Element, maxDepth = 1000): ApiClientLike | null {
-  let fiber: GenericFiberNode | null | undefined = fiberOf(domNode);
+  const cached = apiClients.get(domNode);
+  if (isApiClient(cached)) return cached;
+  let fiber = fiberOf(domNode);
   for (let depth = 0; fiber && depth <= maxDepth; depth++, fiber = fiber.return) {
     for (let dep = fiber.dependencies?.firstContext; dep; dep = dep.next) {
-      if (isApiClient(dep.memoizedValue)) return dep.memoizedValue;
+      if (isApiClient(dep.memoizedValue)) {
+        apiClients.set(domNode, dep.memoizedValue);
+        return dep.memoizedValue;
+      }
     }
   }
   return null;
@@ -268,14 +277,14 @@ function isEventSlotArray(value: unknown): value is EventSlot[] {
 export function findSlotsList(root: Element, maxNodes = 20000): { slots: EventSlot[]; hosts: Element[] } | null {
   const start = fiberOf(root);
   if (!start) return null;
-  const stack: GenericFiberNode[] = [start];
+  const stack: Fiber[] = [start];
   let visited = 0;
   while (stack.length && visited++ < maxNodes) {
     const fiber = stack.pop()!;
     const slots = fiber.memoizedProps?.slots;
     if (isEventSlotArray(slots)) {
       const hosts: Element[] = [];
-      const hostStack: GenericFiberNode[] = fiber.child ? [fiber.child] : [];
+      const hostStack: Fiber[] = fiber.child ? [fiber.child] : [];
       while (hostStack.length) {
         const f = hostStack.pop()!;
         if (f.stateNode instanceof Element) {
@@ -293,7 +302,7 @@ export function findSlotsList(root: Element, maxNodes = 20000): { slots: EventSl
   return null;
 }
 
-// --- Planning calendar blocks (Intrastek tagging, MAIN world only) ---
+// --- Planning calendar blocks (Intrastek tagging) ---
 
 // The planning calendar is FullCalendar: each block is a
 // `div.scheduler-event[role=button]` whose fiber (verified live: depth 1)
@@ -310,11 +319,6 @@ export interface SchedulerEvent {
   // Intranet activity of the event: back-to-back events of one activity are
   // merged into one Intrastek activity.
   activityInstanceId: string | null;
-}
-
-interface SchedulerFiberNode {
-  memoizedProps?: { renderProps?: { event?: unknown } | null } | null;
-  return?: SchedulerFiberNode | null;
 }
 
 interface EventApiLike {
@@ -337,11 +341,10 @@ function asIso(value: unknown): string | null {
 }
 
 export function extractSchedulerEvent(el: Element, maxDepth = 5): SchedulerEvent | null {
-  const fiberKey = findFiberKey(el);
-  if (!fiberKey) return null;
-  let fiber: SchedulerFiberNode | null | undefined = (el as unknown as Record<string, SchedulerFiberNode>)[fiberKey];
+  let fiber = fiberOf(el);
   for (let depth = 0; fiber && depth <= maxDepth; depth++, fiber = fiber.return) {
-    const event = fiber.memoizedProps?.renderProps?.event as EventApiLike | undefined;
+    const renderProps = fiber.memoizedProps?.renderProps as { event?: unknown } | null | undefined;
+    const event = renderProps?.event as EventApiLike | undefined;
     if (!event || typeof event !== 'object') continue;
     const ext = event.extendedProps && typeof event.extendedProps === 'object' ? event.extendedProps : {};
     const id = asString(ext.id) ?? asString(event.id);
@@ -359,7 +362,7 @@ export function extractSchedulerEvent(el: Element, maxDepth = 5): SchedulerEvent
   return null;
 }
 
-// --- Student page "Absences" tab (MAIN world only, same reason as above) ---
+// --- Student page "Absences" tab ---
 
 // Verified live on /students/<login>#absences ("By activities" view): each
 // absence is a Card whose wrapper component (5 fibers above the
@@ -373,18 +376,10 @@ export interface AbsenceCard {
   login: string;
 }
 
-interface KeyedFiberNode {
-  key?: string | null;
-  memoizedProps?: Record<string, unknown> | null;
-  return?: KeyedFiberNode | null;
-}
-
 const ABSENCE_KEY = /^(\d+)-(\d{4}-\d\d-\d\dT\S+)$/;
 
 export function extractAbsenceCard(card: Element, maxDepth = 25): AbsenceCard | null {
-  const fiberKey = findFiberKey(card);
-  if (!fiberKey) return null;
-  let fiber: KeyedFiberNode | null | undefined = (card as unknown as Record<string, KeyedFiberNode>)[fiberKey];
+  let fiber = fiberOf(card);
   let match: RegExpExecArray | null = null;
   for (let depth = 0; fiber && depth <= maxDepth; depth++, fiber = fiber.return) {
     const props = fiber.memoizedProps;

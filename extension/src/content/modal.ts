@@ -1,9 +1,9 @@
-// Generic small modal dialog for the "Save filter" flow. No existing modal
-// component exists elsewhere in this codebase (dom-inject.ts only has a
-// positioned dropdown menu, openFactionMenu/openChecklistMenu) — built from
-// scratch here, following the same DOM-API-only construction (no innerHTML;
-// the AMO addons-linter flags dynamic innerHTML assignment) already
-// established in dom-inject.ts.
+// Small modal dialog for the units page "Save filter" flow, mounted under
+// <body>. DOM API only (no innerHTML: AMO linter). The .epitools-modal*
+// styles (unit-filters.css) are also reused by the eval-sheet modal, which
+// has its own backdrop class so closeSaveFilterModal() never removes it.
+import { t } from '../i18n/unit-filters';
+import { button, captureEscape, el } from './shared/ui';
 
 export type SaveFilterChoice = { mode: 'create'; name: string } | { mode: 'override' };
 
@@ -11,131 +11,82 @@ export interface SaveFilterModalOptions {
   currentPresetName: string;
   isDefaultSelected: boolean;
   onConfirm: (choice: SaveFilterChoice) => void;
-  onCancel: () => void;
 }
 
 const BACKDROP_CLASS = 'epitools-modal-backdrop';
+let removeEscape: (() => void) | null = null;
 
 export function closeSaveFilterModal(): void {
+  removeEscape?.();
+  removeEscape = null;
   document.querySelector(`.${BACKDROP_CLASS}`)?.remove();
+}
+
+function radioRow(name: string, value: string, label: string): { row: HTMLLabelElement; radio: HTMLInputElement } {
+  const row = el('label', 'epitools-modal-radio-row');
+  const radio = el('input');
+  radio.type = 'radio';
+  radio.name = name;
+  radio.value = value;
+  row.append(radio, label);
+  return { row, radio };
 }
 
 export function openSaveFilterModal(options: SaveFilterModalOptions): void {
   closeSaveFilterModal();
 
-  const backdrop = document.createElement('div');
-  backdrop.className = BACKDROP_CLASS;
-
-  const modal = document.createElement('div');
-  modal.className = 'epitools-modal';
+  const backdrop = el('div', BACKDROP_CLASS);
+  const modal = el('div', 'epitools-modal');
   modal.setAttribute('role', 'dialog');
   modal.setAttribute('aria-modal', 'true');
+  modal.appendChild(el('h2', 'epitools-modal-title', t('saveFilter')));
 
-  const title = document.createElement('h2');
-  title.className = 'epitools-modal-title';
-  title.textContent = 'Save filter';
-  modal.appendChild(title);
-
-  const form = document.createElement('div');
-  form.className = 'epitools-modal-form';
-
-  const groupName = 'epitools-save-mode';
-
-  // "Create new" row
-  const createRow = document.createElement('label');
-  createRow.className = 'epitools-modal-radio-row';
-  const createRadio = document.createElement('input');
-  createRadio.type = 'radio';
-  createRadio.name = groupName;
-  createRadio.value = 'create';
-  createRadio.checked = true;
-  createRow.appendChild(createRadio);
-  createRow.appendChild(document.createTextNode('Create new'));
-  form.appendChild(createRow);
-
-  const nameField = document.createElement('input');
+  const form = el('div', 'epitools-modal-form');
+  const create = radioRow('epitools-save-mode', 'create', t('createNew'));
+  create.radio.checked = true;
+  const nameField = el('input', 'epitools-modal-field');
   nameField.type = 'text';
-  nameField.className = 'epitools-modal-field';
-  nameField.placeholder = 'Filter name';
-  form.appendChild(nameField);
-
-  // "Override" row
-  const overrideRow = document.createElement('label');
-  overrideRow.className = 'epitools-modal-radio-row';
-  if (options.isDefaultSelected) overrideRow.classList.add('epitools-modal-radio-disabled');
-  const overrideRadio = document.createElement('input');
-  overrideRadio.type = 'radio';
-  overrideRadio.name = groupName;
-  overrideRadio.value = 'override';
-  overrideRadio.disabled = options.isDefaultSelected;
-  overrideRow.appendChild(overrideRadio);
-  overrideRow.appendChild(document.createTextNode(`Override "${options.currentPresetName}"`));
-  form.appendChild(overrideRow);
-
-  const error = document.createElement('p');
-  error.className = 'epitools-modal-error';
+  nameField.placeholder = t('filterName');
+  const override = radioRow('epitools-save-mode', 'override', t('override', { name: options.currentPresetName }));
+  override.radio.disabled = options.isDefaultSelected;
+  if (options.isDefaultSelected) override.row.classList.add('epitools-modal-radio-disabled');
+  const error = el('p', 'epitools-modal-error');
   error.style.display = 'none';
-  form.appendChild(error);
-
+  form.append(create.row, nameField, override.row, error);
   modal.appendChild(form);
 
-  const actions = document.createElement('div');
-  actions.className = 'epitools-modal-actions';
-
-  const cancelBtn = document.createElement('button');
-  cancelBtn.type = 'button';
-  cancelBtn.textContent = 'Cancel';
-
-  const saveBtn = document.createElement('button');
-  saveBtn.type = 'button';
-  saveBtn.className = 'epitools-modal-primary';
-  saveBtn.textContent = 'Save';
-
-  actions.appendChild(cancelBtn);
-  actions.appendChild(saveBtn);
+  const actions = el('div', 'epitools-modal-actions');
+  const cancelBtn = button(t('cancel'));
+  const saveBtn = button(t('save'), 'epitools-modal-primary');
+  actions.append(cancelBtn, saveBtn);
   modal.appendChild(actions);
 
   backdrop.appendChild(modal);
   document.body.appendChild(backdrop);
   nameField.focus();
 
-  function cancel(): void {
-    closeSaveFilterModal();
-    options.onCancel();
-  }
-
-  cancelBtn.addEventListener('click', cancel);
+  removeEscape = captureEscape(closeSaveFilterModal);
+  cancelBtn.addEventListener('click', closeSaveFilterModal);
   backdrop.addEventListener('click', (ev) => {
-    if (ev.target === backdrop) cancel();
+    if (ev.target === backdrop) closeSaveFilterModal();
   });
-  function onKeydown(ev: KeyboardEvent): void {
-    if (ev.key === 'Escape') {
-      document.removeEventListener('keydown', onKeydown);
-      cancel();
-    }
-  }
-  document.addEventListener('keydown', onKeydown);
-
-  createRadio.addEventListener('change', () => {
-    if (createRadio.checked) nameField.focus();
+  create.radio.addEventListener('change', () => {
+    if (create.radio.checked) nameField.focus();
   });
 
   saveBtn.addEventListener('click', () => {
-    const mode = overrideRadio.checked && !overrideRadio.disabled ? 'override' : 'create';
-    if (mode === 'create') {
-      const name = nameField.value.trim();
-      if (!name) {
-        error.textContent = 'Enter a name for this filter.';
-        error.style.display = '';
-        return;
-      }
-      document.removeEventListener('keydown', onKeydown);
+    if (override.radio.checked && !override.radio.disabled) {
       closeSaveFilterModal();
-      options.onConfirm({ mode: 'create', name });
+      options.onConfirm({ mode: 'override' });
       return;
     }
-    document.removeEventListener('keydown', onKeydown);
+    const name = nameField.value.trim();
+    if (!name) {
+      error.textContent = t('nameRequired');
+      error.style.display = '';
+      return;
+    }
     closeSaveFilterModal();
-    options.onConfirm({ mode: 'override' });
+    options.onConfirm({ mode: 'create', name });
   });
 }

@@ -7,7 +7,11 @@
 // when an Intrastek key is saved). Must not use browser.* nor import the
 // polyfill. Everything written here is readable (and forgeable) by the page,
 // so the isolated half treats it as untrusted.
-import { extractPlanningEvent, extractSchedulerEvent } from './fiber-extract';
+import { extractSchedulerEvent } from './fiber-extract';
+import { dialogEvent, dialogs } from './shared/mantine';
+import { watchDom } from './shared/dom-watch';
+
+const ENABLED_ATTR = 'data-epitools-intrastek';
 
 const ID_ATTR = 'data-epitools-event-id';
 const TITLE_ATTR = 'data-epitools-event-title';
@@ -25,7 +29,7 @@ interface Tag {
 }
 
 function isEnabled(): boolean {
-  return document.documentElement.dataset.epitoolsIntrastek === 'on';
+  return document.documentElement.getAttribute(ENABLED_ATTR) === 'on';
 }
 
 // Only writes what changed: setting an attribute to its current value would
@@ -50,7 +54,12 @@ function applyTag(el: Element, tag: Tag | null): void {
   setAttr(el, ACTIVITY_ATTR, tag.activity && /^\d+$/.test(tag.activity) ? tag.activity : null);
 }
 
+// Skips the clean-up query on every mutation while the feature is off.
+let tagged = false;
+
 function clearAll(): void {
+  if (!tagged) return;
+  tagged = false;
   for (const el of Array.from(document.querySelectorAll(`[${ID_ATTR}]`))) {
     for (const name of ATTRS) el.removeAttribute(name);
   }
@@ -61,6 +70,7 @@ function check(): void {
     clearAll();
     return;
   }
+  tagged = true;
 
   // Calendar blocks. Re-read every time (cheap, ~50-200 blocks): FullCalendar
   // may reuse a block element for another event after navigation.
@@ -80,9 +90,8 @@ function check(): void {
 
   // Event-details modal, found the way event-info.ts finds it (unit link in
   // a Mantine dialog, event record in its React props).
-  for (const dialog of Array.from(document.querySelectorAll('section[role=dialog]'))) {
-    const unitLink = dialog.querySelector('a[href^="/units/"]');
-    const event = unitLink ? extractPlanningEvent(unitLink) : null;
+  for (const dialog of dialogs()) {
+    const event = dialogEvent(dialog);
     applyTag(
       dialog,
       event && {
@@ -96,23 +105,6 @@ function check(): void {
   }
 }
 
-let debounceTimer: number | undefined;
-
-// Throttled, not debounced: run 150 ms after the first mutation and ignore
-// the next ones until then. The site rewrites its <style> tags every ~100 ms
-// on some views (e.g. planning with several semesters selected), so a
-// debounce that restarts on every mutation would starve check() forever.
-function scheduleCheck(): void {
-  if (debounceTimer !== undefined) return;
-  debounceTimer = window.setTimeout(() => {
-    debounceTimer = undefined;
-    check();
-  }, 150);
+export function init(): void {
+  watchDom(check, { htmlAttributes: [ENABLED_ATTR] });
 }
-
-new MutationObserver(scheduleCheck).observe(document.body, { childList: true, subtree: true });
-new MutationObserver(scheduleCheck).observe(document.documentElement, {
-  attributes: true,
-  attributeFilter: ['data-epitools-intrastek'],
-});
-check();

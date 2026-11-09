@@ -15,7 +15,8 @@
   max-width: 160px;
 }
 
-.epitools-unit-filters-save-btn {
+.epitools-unit-filters-save-btn,
+.epitools-unit-filters-reset-btn {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -28,11 +29,13 @@
   cursor: pointer;
 }
 
-.epitools-unit-filters-save-btn:hover {
+.epitools-unit-filters-save-btn:hover,
+.epitools-unit-filters-reset-btn:hover {
   background: #2a2a2a;
 }
 
-.epitools-unit-filters-save-icon {
+.epitools-unit-filters-save-icon,
+.epitools-unit-filters-reset-icon {
   display: inline-block;
   width: 14px;
   height: 14px;
@@ -52,70 +55,11 @@
   backdrop-filter: blur(1px);
 }
 
-.epitools-unit-filters-loader-spinner {
-  width: 14px;
-  height: 14px;
-  border: 2px solid rgba(255, 255, 255, 0.25);
-  border-top-color: #e6e6e6;
-  border-radius: 50%;
-  animation: epitools-spin 0.7s linear infinite;
-}
-
-@keyframes epitools-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.epitools-unit-filters-clear-warning {
-  position: absolute;
-  z-index: 1000000;
-  max-width: 320px;
-  background: #3a2a10;
-  color: #ffd88a;
-  border: 1px solid rgba(255, 216, 138, 0.4);
-  border-radius: 6px;
-  padding: 8px 28px 8px 10px;
-  font-size: 12px;
-  line-height: 1.4;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
-}
-
-.epitools-unit-filters-clear-warning-close {
-  position: absolute;
-  top: 4px;
-  right: 6px;
-  background: none;
-  border: none;
-  color: #ffd88a;
-  font-size: 14px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 2px 4px;
-}
-
-.epitools-unit-filters-reset-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: #1e1e1e;
-  color: #e6e6e6;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 4px;
-  padding: 4px 10px;
+.epitools-unit-filters-loader .epitools-loading {
   font-size: 13px;
-  cursor: pointer;
+  opacity: 1;
 }
 
-.epitools-unit-filters-reset-btn:hover {
-  background: #2a2a2a;
-}
-
-.epitools-unit-filters-reset-icon {
-  display: inline-block;
-  width: 14px;
-  height: 14px;
-}
 
 .epitools-modal-backdrop {
   position: fixed;

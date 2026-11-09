@@ -12,7 +12,7 @@
 // called through the site's own generated client (bearer auth inside), found
 // as a React context value like the eval sheet's avatars. So no browser.*
 // APIs here; the popup toggle is mirrored onto
-// <html data-epitools-absence-status="on"> by event-info-toggle.ts.
+// <html data-epitools-absence-status="on"> (FLAGS.absenceStatus).
 //
 // The button and menu are hand-built copies of the site's Mantine markup
 // (classes and CSS variables captured live from the planning modal), not
@@ -27,6 +27,10 @@ import {
   type AttendanceStatus,
   type QueryClientLike,
 } from './fiber-extract';
+import { svgIcon } from './shared/mantine';
+import { datasetAttr, watchDom } from './shared/dom-watch';
+import { FLAGS, mirroredFlagOn } from '../settings';
+import { t } from '../i18n/absence-status';
 
 const BUTTON_ATTR = 'data-epitools-absence-btn';
 const NATIVE_ATTR = 'data-epitools-absence-native';
@@ -34,10 +38,12 @@ const MENU_ATTR = 'data-epitools-absence-menu';
 const PLANNING_ATTR = 'data-epitools-absence-planning';
 const ERROR_MS = 2500;
 
+type Key = Parameters<typeof t>[0];
+
 interface StatusOption {
   status: AttendanceStatus;
-  label: string;
-  action: string;
+  label: Key;
+  action: Key;
   color: string;
   textColor: string;
   icon: string;
@@ -48,8 +54,8 @@ interface StatusOption {
 const OPTIONS: StatusOption[] = [
   {
     status: 'present',
-    label: 'Present',
-    action: 'Mark present',
+    label: 'present',
+    action: 'markPresent',
     color: 'green',
     textColor: 'black',
     icon: 'user-check',
@@ -57,8 +63,8 @@ const OPTIONS: StatusOption[] = [
   },
   {
     status: 'absent',
-    label: 'Absent',
-    action: 'Mark absent',
+    label: 'absent',
+    action: 'markAbsent',
     color: 'red',
     textColor: 'white',
     icon: 'user-off',
@@ -70,8 +76,8 @@ const OPTIONS: StatusOption[] = [
   },
   {
     status: 'justified',
-    label: 'Justified',
-    action: 'Justify absence',
+    label: 'justified',
+    action: 'justify',
     color: 'yellow',
     textColor: 'black',
     icon: 'user-exclamation',
@@ -119,7 +125,9 @@ function loadGraded(api: ApiClientLike, eventId: number): void {
     )
     .finally(() => {
       gradedLoading.delete(eventId);
-      scheduleCheck();
+      for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>(`[${BUTTON_ATTR}]`))) {
+        if (eventIdOf(button.getAttribute(BUTTON_ATTR) ?? '') === eventId) renderButton(button);
+      }
     });
 }
 
@@ -131,9 +139,9 @@ function eventIdOf(key: string): number {
 function lockReason(key: string): string {
   const state = graded.get(eventIdOf(key));
   if (state === false) return '';
-  if (state === true) return 'Graded activity: attendance cannot be changed here';
-  if (state === 'error') return 'Could not check whether this activity is graded';
-  return 'Checking whether this activity is graded…';
+  if (state === true) return t('graded');
+  if (state === 'error') return t('gradedUnknown');
+  return t('gradedChecking');
 }
 
 function cardKey(card: AbsenceCard): string {
@@ -154,10 +162,6 @@ function isListedAbsence(qc: QueryClientLike | null, absence: AbsenceCard): bool
         r?.eventId === absence.eventId && r?.startDate === absence.startDate,
     )
   );
-}
-
-function isEnabled(): boolean {
-  return document.documentElement.dataset.epitoolsAbsenceStatus === 'on';
 }
 
 function optionOf(status: AttendanceStatus): StatusOption {
@@ -188,7 +192,7 @@ function buildButton(key: string, nativeLabel: string): HTMLButtonElement {
   button.className = 'mantine-focus-auto m_87cf2631 mantine-UnstyledButton-root';
   button.style.textTransform = 'none';
   button.setAttribute(BUTTON_ATTR, key);
-  button.setAttribute('aria-label', 'Attendance');
+  button.setAttribute('aria-label', t('attendance'));
   button.setAttribute('aria-haspopup', 'menu');
   button.setAttribute('aria-expanded', 'false');
   button.dataset.epitoolsNativeLabel = nativeLabel;
@@ -218,12 +222,15 @@ function renderButton(button: HTMLButtonElement): void {
   const status = statuses.get(key) ?? 'absent';
   const option = optionOf(status);
   // The site's own (possibly localized) "Absent" label while unchanged.
-  const label = status === 'absent' ? button.dataset.epitoolsNativeLabel || option.label : option.label;
+  const label = status === 'absent' ? button.dataset.epitoolsNativeLabel || t(option.label) : t(option.label);
   const badge = button.firstElementChild as HTMLElement;
   const busy = pending.has(key);
   const lock = lockReason(key);
-  if (button.dataset.epitoolsRendered === `${status}|${busy}|${lock}`) return;
-  button.dataset.epitoolsRendered = `${status}|${busy}|${lock}`;
+  // Spinner while the attendance write or the graded check is in flight.
+  const loading = busy || !graded.has(eventIdOf(key));
+  const rendered = `${status}|${busy}|${lock}|${label}`;
+  if (button.dataset.epitoolsRendered === rendered) return;
+  button.dataset.epitoolsRendered = rendered;
   styleBadge(badge, option, label);
   button.disabled = busy;
   // aria-disabled, not disabled: a disabled button shows no title tooltip in every browser.
@@ -236,6 +243,9 @@ function renderButton(button: HTMLButtonElement): void {
     button.removeAttribute('title');
   }
   button.style.opacity = busy || lock ? '0.6' : '';
+  button.classList.toggle('epitools-busy', loading);
+  if (loading) button.setAttribute('aria-busy', 'true');
+  else button.removeAttribute('aria-busy');
 }
 
 // --- "View on planning" link (copy of the project page's timeline icon) ---
@@ -267,8 +277,8 @@ function buildPlanningLink(key: string, absence: AbsenceCard): HTMLAnchorElement
     'mantine-focus-auto mantine-active m_8d3f4000 mantine-ActionIcon-root m_87cf2631 mantine-UnstyledButton-root';
   link.dataset.variant = 'subtle';
   link.setAttribute(PLANNING_ATTR, key);
-  link.setAttribute('aria-label', 'View on planning');
-  link.title = 'View on planning';
+  link.setAttribute('aria-label', t('viewOnPlanning'));
+  link.title = t('viewOnPlanning');
   link.href = planningUrl(absence);
   link.setAttribute(
     'style',
@@ -302,7 +312,7 @@ function flashError(button: HTMLButtonElement, message: string): void {
   const badge = button.firstElementChild as HTMLElement;
   button.dataset.epitoolsError = 'on';
   button.title = message;
-  (badge.firstElementChild as HTMLElement).textContent = 'Error';
+  (badge.firstElementChild as HTMLElement).textContent = t('error');
   window.clearTimeout(Number(button.dataset.epitoolsTimer));
   button.dataset.epitoolsTimer = String(
     window.setTimeout(() => {
@@ -323,30 +333,6 @@ function icon(option: StatusOption): SVGSVGElement {
   return svgIcon(`var(--mantine-color-${option.color}-6)`, option.icon, option.paths);
 }
 
-function svgIcon(stroke: string, name: string, paths: string[]): SVGSVGElement {
-  const ns = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(ns, 'svg');
-  for (const [attr, value] of Object.entries({
-    width: '16',
-    height: '16',
-    viewBox: '0 0 24 24',
-    fill: 'none',
-    stroke,
-    'stroke-width': '2',
-    'stroke-linecap': 'round',
-    'stroke-linejoin': 'round',
-    class: `tabler-icon tabler-icon-${name}`,
-  })) {
-    svg.setAttribute(attr, value);
-  }
-  for (const d of paths) {
-    const path = document.createElementNS(ns, 'path');
-    path.setAttribute('d', d);
-    svg.appendChild(path);
-  }
-  return svg;
-}
-
 function buildMenuItem(option: StatusOption, button: HTMLButtonElement): HTMLButtonElement {
   const item = document.createElement('button');
   item.type = 'button';
@@ -362,7 +348,7 @@ function buildMenuItem(option: StatusOption, button: HTMLButtonElement): HTMLBut
   const label = document.createElement('div');
   label.className = 'm_5476e0d3 mantine-Menu-itemLabel';
   label.dataset.menuItemLabel = 'true';
-  label.textContent = option.action;
+  label.textContent = t(option.action);
   item.append(section, label);
 
   // Mantine marks the hovered/focused item with data-hovered.
@@ -424,26 +410,6 @@ function closeMenu(): void {
   openMenuButton = null;
 }
 
-window.addEventListener(
-  'pointerdown',
-  (e) => {
-    const target = e.target as Node;
-    if (openMenuEl && !openMenuEl.contains(target) && !openMenuButton?.contains(target)) closeMenu();
-  },
-  true,
-);
-window.addEventListener(
-  'keydown',
-  (e) => {
-    if (e.key !== 'Escape' || !openMenuEl) return;
-    e.stopPropagation();
-    const button = openMenuButton;
-    closeMenu();
-    button?.focus();
-  },
-  true,
-);
-
 // --- API ---
 
 async function setStatus(button: HTMLButtonElement, status: AttendanceStatus): Promise<void> {
@@ -460,7 +426,7 @@ async function setStatus(button: HTMLButtonElement, status: AttendanceStatus): P
     !api ||
     typeof setAttendance !== 'function'
   ) {
-    flashError(button, 'Could not read this absence from the page');
+    flashError(button, t('unreadable'));
     return;
   }
   if (lockReason(key) || pending.has(key) || (statuses.get(key) ?? 'absent') === status) return;
@@ -473,7 +439,7 @@ async function setStatus(button: HTMLButtonElement, status: AttendanceStatus): P
   } catch (err) {
     pending.delete(key);
     renderButton(button);
-    flashError(button, err instanceof Error && err.message ? err.message : 'Attendance update failed');
+    flashError(button, err instanceof Error && err.message ? err.message : t('updateFailed'));
     return;
   }
   pending.delete(key);
@@ -492,9 +458,13 @@ function hasSetAttendance(api: ApiClientLike | null): boolean {
   return typeof api?.events?.setAttendance === 'function';
 }
 
+// Absence cards only exist on a student page: skip the card scan elsewhere.
+let injected = false;
+
 function check(): void {
-  if (!isEnabled()) {
-    removeAll();
+  if (!mirroredFlagOn(FLAGS.absenceStatus) || !location.pathname.startsWith('/students/')) {
+    if (injected || openMenuEl) removeAll();
+    injected = false;
     return;
   }
   // Drop our menu if its button was unmounted (page change, tab switch).
@@ -527,6 +497,7 @@ function check(): void {
     if (api === undefined) api = findApiClient(card);
     if (!api || !hasSetAttendance(api)) return;
 
+    injected = true;
     native.setAttribute(NATIVE_ATTR, '');
     const button = buildButton(key, native.textContent?.trim() ?? '');
     native.after(button, buildPlanningLink(key, absence));
@@ -535,20 +506,26 @@ function check(): void {
   }
 }
 
-let checkTimer: number | undefined;
-
-// Throttled, not debounced (see event-info.ts).
-function scheduleCheck(): void {
-  if (checkTimer !== undefined) return;
-  checkTimer = window.setTimeout(() => {
-    checkTimer = undefined;
-    check();
-  }, 150);
+export function init(): void {
+  window.addEventListener(
+    'pointerdown',
+    (e) => {
+      const target = e.target as Node;
+      if (openMenuEl && !openMenuEl.contains(target) && !openMenuButton?.contains(target)) closeMenu();
+    },
+    true,
+  );
+  window.addEventListener(
+    'keydown',
+    (e) => {
+      if (e.key !== 'Escape' || !openMenuEl) return;
+      e.stopPropagation();
+      const button = openMenuButton;
+      closeMenu();
+      button?.focus();
+    },
+    true,
+  );
+  // The popup toggle flips the mirrored attribute without any body mutation.
+  watchDom(check, { htmlAttributes: [datasetAttr(FLAGS.absenceStatus.mirror)] });
 }
-
-new MutationObserver(scheduleCheck).observe(document.body, { childList: true, subtree: true });
-new MutationObserver(scheduleCheck).observe(document.documentElement, {
-  attributes: true,
-  attributeFilter: ['data-epitools-absence-status'],
-});
-check();

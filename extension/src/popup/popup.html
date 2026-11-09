@@ -2,67 +2,20 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Intrafeur</title>
+  <title data-i18n="popupTitle"></title>
+  <link rel="stylesheet" href="../ui/pages.css" />
   <link rel="stylesheet" href="popup.css" />
 </head>
-<body>
-  <main>
-    <h1>Intrafeur</h1>
-
-    <label class="toggle-row">
-      <input type="checkbox" id="factionsEnabled" />
-      <span>Enable faction tagging</span>
-    </label>
-    <p class="hint">
-      Turns off the Faction column, badges, and the CSV export change — on
-      this browser only. Shared faction data on the backend isn't affected;
-      other staff still see it normally.
-    </p>
-
-    <label class="toggle-row">
-      <input type="checkbox" id="unitFiltersEnabled" />
-      <span>Enable module filter presets</span>
-    </label>
-    <p class="hint">
-      Adds a preset selector with Save/Reset buttons to the “Current units”
-      table on My units, and restores the selected preset when the table
-      loads.
-    </p>
-
-    <label class="toggle-row">
-      <input type="checkbox" id="eventInfoEnabled" />
-      <span>Enable event “Copy info” button</span>
-    </label>
-    <p class="hint">
-      Adds a “Copy info” button to planning event details that copies a
-      standardized description (module, project, type, links).
-    </p>
-
-    <label class="toggle-row">
-      <input type="checkbox" id="evalSheetEnabled" />
-      <span>Enable evaluation sheet (PDF)</span>
-    </label>
-    <p class="hint">
-      Adds a “Fiche d'évaluation” button to planning events (one per slot
-      for slot-based events) that downloads a printable grading sheet.
-    </p>
-
-    <label class="toggle-row">
-      <input type="checkbox" id="absenceStatusEnabled" />
-      <span>Enable attendance button on absences</span>
-    </label>
-    <p class="hint">
-      Replaces the “Absent” badge on a student's Absences tab with the
-      planning's attendance menu (present / absent / justified).
-    </p>
-
-    <p class="hint">
-      Intrastek (event button and Intrastek mode on the planning) has no
-      toggle here: it is on when an Intrastek key is saved in the settings.
-    </p>
-
-    <a id="openOptions" href="#">Backend, faction &amp; Intrastek settings…</a>
-  </main>
+<body class="popup">
+  <header class="popup-header">
+    <h1 class="popup-title"><span data-i18n="popupTitle"></span> <span id="version" class="version"></span></h1>
+    <p class="popup-subtitle" data-i18n="popupSubtitle"></p>
+  </header>
+  <main id="features"></main>
+  <footer class="popup-footer">
+    <button type="button" class="link" id="openSetup" data-i18n="popupSetup"></button>
+    <button type="button" class="link" id="openSettings" data-i18n="popupSettings"></button>
+  </footer>
   <script src="popup.js"></script>
 </body>
 </html>

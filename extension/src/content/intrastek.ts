@@ -16,6 +16,12 @@
 //   menu. Left-click keeps the site's behaviour.
 import browser from 'webextension-polyfill';
 import { buildIconSvg } from './dom-inject';
+import { watchDom, datasetAttr } from './shared/dom-watch';
+import { getLocal, onLocalChange } from './shared/ext-storage';
+import { el, errorText, setBusy, spinner, toast } from './shared/ui';
+import { currentLang, LANG_DATASET_KEY } from '../i18n/core';
+import { t } from '../i18n/intrastek';
+import { FLAGS, flagValue } from '../settings';
 import {
   api,
   cachedState,
@@ -26,6 +32,7 @@ import {
   EVENT_TITLE_ATTR,
   fetchStatus,
   groupView,
+  isFirstLoad,
   onCacheChange,
   parseEventId,
   targetGroupId,
@@ -36,14 +43,12 @@ import {
   isEventPopupOpenFor,
   openBlockMenu,
   openEventPopup,
-  toast,
   type EventInfo,
 } from './intrastek-ui';
 import {
   INTRASTEK_API_KEY_KEY,
   INTRASTEK_API_URL_KEY,
   INTRASTEK_DEFAULT_GROUP_KEY,
-  INTRASTEK_MODE_KEY,
   type IntrastekEventState,
   type IntrastekMe,
 } from '../types';
@@ -61,6 +66,7 @@ const POS_ATTR = 'data-epitools-ik-pos';
 const LEGEND_SIG_ATTR = 'data-epitools-ik-legend';
 const BLOCK_CLASSES = ['epitools-ik-initialized', 'epitools-ik-proposed', 'epitools-ik-none', 'epitools-ik-linked'];
 const BLOCK_SELECTOR = '.scheduler-event';
+const MODE_KEY = FLAGS.intrastekMode.key;
 // Fallback only (the button is found by shape first); EN + FR (FR unverified).
 const PLANNING_MODE_LABEL = /planning mode|mode planning|mode planification/i;
 // Tabler "users" icon.
@@ -78,6 +84,11 @@ let me: IntrastekMe | null = null;
 let meError = '';
 let mePromise: Promise<IntrastekMe | null> | null = null;
 let statusError = '';
+// Visible ids whose first status fetch is running (legend spinner).
+let statusLoading = false;
+// Some block carries our classes/badge (skips the cleanup scan when not).
+let decorated = false;
+let unwatch: (() => void) | null = null;
 
 // --- me (who the key belongs to) ---
 
@@ -91,7 +102,7 @@ function loadMe(): Promise<IntrastekMe | null> {
       },
       (err: unknown) => {
         me = null;
-        meError = (err as Error)?.message || String(err);
+        meError = errorText(err);
         // Retried on the next explicit action (modal button, mode toggle).
         mePromise = null;
         return null;
@@ -131,20 +142,16 @@ function dotState(state: IntrastekEventState | null): string {
   return state.activities.length ? 'initialized' : 'none';
 }
 
-const DOT_TITLES: Record<string, string> = {
-  unknown: 'Intrastek state unknown',
-  proposed: 'Pending proposal',
-  initialized: 'Initialized in Intrastek',
-  none: 'Not in Intrastek',
-};
+function dotTitle(state: string): string {
+  if (state === 'proposed') return t('dotProposed');
+  if (state === 'initialized') return t('dotInitialized');
+  return state === 'none' ? t('dotNone') : t('dotUnknown');
+}
 
 function buildModalButton(): HTMLButtonElement {
-  const btn = document.createElement('button');
+  const btn = el('button', MODAL_BUTTON_CLASS);
   btn.type = 'button';
-  btn.className = MODAL_BUTTON_CLASS;
-  const dot = document.createElement('span');
-  dot.className = `${DOT_CLASS} ${DOT_CLASS}--unknown`;
-  btn.append(dot, document.createTextNode('Intrastek'));
+  btn.append(el('span', `${DOT_CLASS} ${DOT_CLASS}--unknown`), document.createTextNode('Intrastek'));
   btn.addEventListener('click', (ev) => {
     ev.preventDefault();
     ev.stopPropagation();
@@ -157,10 +164,13 @@ async function onModalButtonClick(btn: HTMLButtonElement): Promise<void> {
   // Re-read on click: React may reuse the modal DOM for another event.
   const dialog = btn.closest('section[role=dialog]');
   const event = dialog ? dialogEvent(dialog) : null;
-  if (!dialog || !event) return;
+  if (!dialog || !event || btn.disabled) return;
+  // First click of the page waits for /extension/me: show it.
+  const restore = me ? null : setBusy(btn);
   const who = await loadMe();
+  restore?.();
   if (!who) {
-    toast(meError || 'Intrastek is unreachable', 'error');
+    toast(meError || t('unreachable'), 'error');
     return;
   }
   openEventPopup(dialog, event, who, currentTarget());
@@ -185,16 +195,15 @@ function syncModalButtons(): void {
       btn = buildModalButton();
       header.insertBefore(btn, closeButton);
     }
-    const state = cachedState(event.id);
-    const wanted = `${DOT_CLASS} ${DOT_CLASS}--${dotState(state)}`;
+    const dotKind = dotState(cachedState(event.id));
+    const wanted = `${DOT_CLASS} ${DOT_CLASS}--${dotKind}`;
     const dot = btn.querySelector(`.${DOT_CLASS}`);
-    if (dot && dot.className !== wanted) {
-      dot.className = wanted;
-      btn.title = DOT_TITLES[dotState(state)];
-    }
+    const title = dotTitle(dotKind);
+    if (dot && dot.className !== wanted) dot.className = wanted;
+    if (btn.title !== title) btn.title = title;
     fetchStatus([event.id]).then(
       (fetched) => {
-        if (fetched) scheduleCheck();
+        if (fetched) kick();
       },
       () => {
         /* backoff in the cache; the dot stays "unknown" */
@@ -274,7 +283,7 @@ function buildModeButton(site: HTMLButtonElement): HTMLButtonElement {
       icon.setAttribute('height', siteSvg?.getAttribute('height') || size);
     }
     iconOnly.replaceChildren(icon);
-    btn.setAttribute('aria-label', 'Intrastek mode');
+    btn.setAttribute('aria-label', t('modeLabel'));
   } else if (leftSection) {
     const siteSvg = leftSection.querySelector('svg');
     const icon = buildIconSvg(MODE_ICON_PATHS);
@@ -290,15 +299,15 @@ function buildModeButton(site: HTMLButtonElement): HTMLButtonElement {
   } else if (label === btn) {
     // No label span: keep the icon section, replace the rest.
     for (const child of Array.from(btn.childNodes)) if (child !== leftSection) child.remove();
-    btn.appendChild(document.createTextNode('Intrastek mode'));
+    btn.appendChild(document.createTextNode(t('modeLabel')));
   } else {
-    label.textContent = 'Intrastek mode';
+    label.textContent = t('modeLabel');
   }
 
   btn.addEventListener('click', (ev) => {
     ev.preventDefault();
     ev.stopPropagation();
-    void browser.storage.local.set({ [INTRASTEK_MODE_KEY]: !modeOn }).catch(() => undefined);
+    void browser.storage.local.set({ [MODE_KEY]: !modeOn }).catch(() => undefined);
     setMode(!modeOn);
   });
   return btn;
@@ -329,8 +338,9 @@ function syncModeButton(): HTMLElement | null {
   if (ours.getAttribute('aria-pressed') !== pressed) {
     ours.setAttribute('aria-pressed', pressed);
     ours.classList.toggle('epitools-ik-mode-on', modeOn);
-    ours.title = modeOn ? 'Intrastek mode is on (click to turn off)' : 'Show Intrastek staffing on the calendar';
   }
+  const title = modeOn ? t('modeOnTitle') : t('modeOffTitle');
+  if (ours.title !== title) ours.title = title;
   return ours;
 }
 
@@ -384,6 +394,7 @@ function decorateBlocks(): void {
     ) {
       continue;
     }
+    decorated = true;
     block.classList.remove(...BLOCK_CLASSES);
     if (cls) block.classList.add(cls);
     if (badge) {
@@ -403,24 +414,28 @@ function decorateBlocks(): void {
     block.setAttribute(SIG_ATTR, sig);
   }
 
+  statusLoading = false;
   if (!ids.length) return;
   fetchStatus(ids).then(
     (fetched) => {
       if (!fetched) return;
       statusError = '';
-      if (modeOn) scheduleCheck();
+      if (modeOn) kick();
     },
     (err: unknown) => {
-      const message = (err as Error)?.message || String(err);
-      if (message !== statusError) {
-        statusError = message;
-        if (modeOn) scheduleCheck();
-      }
+      statusError = errorText(err);
+      // Unconditional (clears the spinner); no loop: the failed ids are in
+      // backoff, so the next check fetches nothing.
+      if (modeOn) kick();
     },
   );
+  // fetchStatus registers its requests synchronously.
+  statusLoading = isFirstLoad(ids);
 }
 
 function undecorateAll(): void {
+  if (!decorated) return;
+  decorated = false;
   for (const block of Array.from(document.querySelectorAll<HTMLElement>(`[${SIG_ATTR}]`))) undecorate(block);
   for (const badge of Array.from(document.querySelectorAll(`.${BADGE_CLASS}`))) badge.remove();
 }
@@ -432,11 +447,8 @@ function legendError(): string {
 }
 
 function swatch(cls: string, text: string): HTMLElement {
-  const item = document.createElement('span');
-  item.className = 'epitools-ik-legend-item';
-  const box = document.createElement('span');
-  box.className = `epitools-ik-swatch ${cls}`;
-  item.append(box, document.createTextNode(text));
+  const item = el('span', 'epitools-ik-legend-item');
+  item.append(el('span', `epitools-ik-swatch ${cls}`), document.createTextNode(text));
   return item;
 }
 
@@ -445,12 +457,10 @@ function swatch(cls: string, text: string): HTMLElement {
 // storage.local key as the options page's default group, so both stay in
 // sync; storage.onChanged then re-renders the blocks.
 function buildGroupSelect(): HTMLSelectElement {
-  const select = document.createElement('select');
-  select.className = GROUP_SELECT_CLASS;
-  select.setAttribute('aria-label', 'Intrastek group shown on the calendar');
+  const select = el('select', GROUP_SELECT_CLASS);
   select.addEventListener('change', () => {
     configuredGroupId = select.value;
-    scheduleCheck();
+    kick();
     void browser.storage.local.set({ [INTRASTEK_DEFAULT_GROUP_KEY]: select.value }).catch(() => undefined);
   });
   return select;
@@ -459,18 +469,17 @@ function buildGroupSelect(): HTMLSelectElement {
 function syncGroupSelect(select: HTMLSelectElement): void {
   const groups = me?.groups ?? [];
   const gid = currentTarget() ?? '';
-  const sig = groups.map((g) => `${g.id}:${g.name}`).join('|');
+  const sig = `${currentLang()}|${groups.map((g) => `${g.id}:${g.name}`).join('|')}`;
   if (select.getAttribute(GROUP_SELECT_SIG_ATTR) !== sig) {
     select.setAttribute(GROUP_SELECT_SIG_ATTR, sig);
+    select.setAttribute('aria-label', t('groupSelectAria'));
+    const options = groups.length ? groups.map((g) => ({ id: g.id, name: g.name })) : [{ id: '', name: me ? t('noGroup') : t('loadingOption') }];
     select.replaceChildren(
-      ...(groups.length
-        ? groups.map((g) => {
-            const option = document.createElement('option');
-            option.value = g.id;
-            option.textContent = g.name;
-            return option;
-          })
-        : [Object.assign(document.createElement('option'), { value: '', textContent: me ? 'no group' : 'loading…' })]),
+      ...options.map((g) => {
+        const option = el('option', undefined, g.name);
+        option.value = g.id;
+        return option;
+      }),
     );
   }
   // Never fight the user while the list is open.
@@ -491,14 +500,10 @@ function syncLegend(modeButton: HTMLElement | null): void {
     }
     const calendar = document.querySelector(CALENDAR_SELECTOR);
     if (!row && !calendar) return;
-    legend = document.createElement('div');
-    legend.className = LEGEND_CLASS;
-    const label = document.createElement('label');
-    label.className = 'epitools-ik-legend-group';
-    label.append(document.createTextNode('Intrastek group: '), buildGroupSelect());
-    const body = document.createElement('span');
-    body.className = LEGEND_BODY_CLASS;
-    legend.append(label, body);
+    legend = el('div', LEGEND_CLASS);
+    const label = el('label', 'epitools-ik-legend-group');
+    label.append(el('span', 'epitools-ik-legend-group-label'), buildGroupSelect());
+    legend.append(label, el('span', LEGEND_BODY_CLASS));
     if (row) row.insertAdjacentElement('afterend', legend);
     else calendar?.insertAdjacentElement('beforebegin', legend);
   }
@@ -507,21 +512,22 @@ function syncLegend(modeButton: HTMLElement | null): void {
   const body = legend.querySelector<HTMLElement>(`.${LEGEND_BODY_CLASS}`);
   if (!body) return;
   const error = legendError();
-  if (body.getAttribute(LEGEND_SIG_ATTR) === error) return;
-  body.setAttribute(LEGEND_SIG_ATTR, error);
+  // Waiting for /extension/me or the first status of the visible blocks.
+  const loading = !error && (!me || statusLoading);
+  const sig = `${currentLang()}|${loading}|${error}`;
+  if (body.getAttribute(LEGEND_SIG_ATTR) === sig) return;
+  body.setAttribute(LEGEND_SIG_ATTR, sig);
+  const groupLabel = legend.querySelector('.epitools-ik-legend-group-label');
+  if (groupLabel) groupLabel.textContent = t('legendGroup');
   body.replaceChildren(
-    swatch('epitools-ik-swatch--initialized', 'initialized (👥 AERs needed)'),
-    swatch('epitools-ik-swatch--proposed', '⏳ proposal pending'),
-    swatch('epitools-ik-swatch--none', 'not initialized'),
-    swatch('epitools-ik-swatch--linked', '🔗 follows the previous event (set it there)'),
-    document.createTextNode('Right-click a block for actions.'),
+    swatch('epitools-ik-swatch--initialized', t('legendInitialized')),
+    swatch('epitools-ik-swatch--proposed', t('legendProposed')),
+    swatch('epitools-ik-swatch--none', t('legendNone')),
+    swatch('epitools-ik-swatch--linked', t('legendLinked')),
+    document.createTextNode(t('legendHint')),
   );
-  if (error) {
-    const err = document.createElement('span');
-    err.className = 'epitools-ik-legend-error';
-    err.textContent = error;
-    body.appendChild(err);
-  }
+  if (loading) body.appendChild(spinner(t('loadingStatus')));
+  if (error) body.appendChild(el('span', 'epitools-ik-legend-error', error));
 }
 
 function removeLegend(): void {
@@ -539,7 +545,7 @@ function onContextMenu(ev: MouseEvent): void {
   ev.stopPropagation();
   const id = parseEventId(block.getAttribute(EVENT_ID_ATTR));
   if (!id) {
-    toast('This event has no intranet id yet, try again in a moment.', 'info');
+    toast(t('noIdYet'), 'info');
     return;
   }
   const event: EventInfo = {
@@ -552,7 +558,7 @@ function onContextMenu(ev: MouseEvent): void {
   const y = ev.pageY;
   void loadMe().then((who) => {
     if (!who) {
-      toast(meError || 'Intrastek is unreachable', 'error');
+      toast(meError || t('unreachable'), 'error');
       return;
     }
     openBlockMenu({
@@ -569,15 +575,8 @@ function onContextMenu(ev: MouseEvent): void {
 
 // --- Main loop ---
 
+// Only runs while a key is saved (subscribed in setKeyPresent).
 function check(): void {
-  if (!keyPresent) {
-    removeModalButtons();
-    document.querySelector(`button[${MODE_BUTTON_ATTR}]`)?.remove();
-    removeLegend();
-    undecorateAll();
-    closeOurMenu();
-    return;
-  }
   syncModalButtons();
   const modeButton = syncModeButton();
   if (!modeOn || !hasCalendar()) {
@@ -590,11 +589,8 @@ function check(): void {
     // After a failure, no automatic retry on every mutation: toggling the
     // mode (or the modal button) retries.
     if (meError) return;
-    void loadMe().then((who) => {
-      if (modeOn) {
-        if (!who) syncLegend(document.querySelector(`button[${MODE_BUTTON_ATTR}]`));
-        else scheduleCheck();
-      }
+    void loadMe().then(() => {
+      if (modeOn) kick();
     });
     return;
   }
@@ -602,25 +598,45 @@ function check(): void {
   syncLegend(modeButton);
 }
 
-let debounceTimer: number | undefined;
+let kickTimer: ReturnType<typeof setTimeout> | undefined;
 
-// Throttled, not debounced: run 200 ms after the first mutation and ignore
-// the next ones until then. The site rewrites its <style> tags every ~100 ms
-// on some views (e.g. planning with several semesters selected), so a
-// debounce that restarts on every mutation would starve check() forever.
-function scheduleCheck(): void {
-  if (debounceTimer !== undefined) return;
-  debounceTimer = window.setTimeout(() => {
-    debounceTimer = undefined;
-    check();
+// Re-check for non-DOM reasons (status fetched, storage/mode change), which
+// the shared observer can't see. Same throttle rule as watchDom: never a
+// restart-on-every-call debounce, never rAF.
+function kick(): void {
+  if (kickTimer !== undefined || !unwatch) return;
+  kickTimer = setTimeout(() => {
+    kickTimer = undefined;
+    if (unwatch) check();
   }, 200);
+}
+
+function cleanup(): void {
+  removeModalButtons();
+  document.querySelector(`button[${MODE_BUTTON_ATTR}]`)?.remove();
+  removeLegend();
+  undecorateAll();
+  closeOurMenu();
 }
 
 function setKeyPresent(present: boolean): void {
   keyPresent = present;
   if (present) document.documentElement.dataset.epitoolsIntrastek = 'on';
   else delete document.documentElement.dataset.epitoolsIntrastek;
-  scheduleCheck();
+  if (present && !unwatch) {
+    // EVENT_ID_ATTR: the MAIN half tags blocks/modal after React rendered
+    // them; the language attribute re-renders our labels.
+    unwatch = watchDom(check, {
+      delay: 200,
+      bodyAttributes: [EVENT_ID_ATTR],
+      htmlAttributes: [datasetAttr(LANG_DATASET_KEY)],
+    });
+  } else if (!present && unwatch) {
+    // No key = nothing to watch (most users): one cleanup, then no work per mutation.
+    unwatch();
+    unwatch = null;
+    cleanup();
+  }
 }
 
 function setMode(on: boolean): void {
@@ -630,52 +646,38 @@ function setMode(on: boolean): void {
   if (!on) closeOurMenu();
   // A failed me is retried when the mode is turned on again.
   if (on && !me && meError) resetMe();
-  scheduleCheck();
+  kick();
 }
 
-async function init(): Promise<void> {
-  let stored: Record<string, unknown>;
-  try {
-    stored = await browser.storage.local.get({
-      [INTRASTEK_API_KEY_KEY]: '',
-      [INTRASTEK_DEFAULT_GROUP_KEY]: '',
-      [INTRASTEK_MODE_KEY]: false,
-    });
-  } catch {
-    // "Extension context invalidated" in a tab not reloaded after an
-    // extension reload — see attendance.ts's initFeatureToggle.
-    return;
-  }
+export async function init(): Promise<void> {
+  const stored = await getLocal({
+    [INTRASTEK_API_KEY_KEY]: '',
+    [INTRASTEK_DEFAULT_GROUP_KEY]: '',
+    [MODE_KEY]: FLAGS.intrastekMode.default,
+  });
+  // null: "Extension context invalidated" (tab not reloaded after an extension reload).
+  if (!stored) return;
   configuredGroupId = String(stored[INTRASTEK_DEFAULT_GROUP_KEY] || '');
-  modeOn = stored[INTRASTEK_MODE_KEY] === true;
+  modeOn = flagValue(FLAGS.intrastekMode, stored[MODE_KEY]);
   setKeyPresent(!!stored[INTRASTEK_API_KEY_KEY]);
 
-  browser.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== 'local') return;
-    if (INTRASTEK_API_KEY_KEY in changes || INTRASTEK_API_URL_KEY in changes) {
+  onLocalChange([INTRASTEK_API_KEY_KEY, INTRASTEK_API_URL_KEY, INTRASTEK_DEFAULT_GROUP_KEY, MODE_KEY], (v) => {
+    if (INTRASTEK_API_KEY_KEY in v || INTRASTEK_API_URL_KEY in v) {
       resetMe();
       clearCache();
       closeEventPopup();
       closeOurMenu();
       undecorateAll();
-      if (INTRASTEK_API_KEY_KEY in changes) setKeyPresent(!!changes[INTRASTEK_API_KEY_KEY].newValue);
-      else scheduleCheck();
+      if (INTRASTEK_API_KEY_KEY in v) setKeyPresent(!!v[INTRASTEK_API_KEY_KEY]);
+      kick();
     }
-    if (INTRASTEK_DEFAULT_GROUP_KEY in changes) {
-      configuredGroupId = String(changes[INTRASTEK_DEFAULT_GROUP_KEY].newValue || '');
-      scheduleCheck();
+    if (INTRASTEK_DEFAULT_GROUP_KEY in v) {
+      configuredGroupId = String(v[INTRASTEK_DEFAULT_GROUP_KEY] || '');
+      kick();
     }
-    if (INTRASTEK_MODE_KEY in changes) setMode(changes[INTRASTEK_MODE_KEY].newValue === true);
+    if (MODE_KEY in v) setMode(flagValue(FLAGS.intrastekMode, v[MODE_KEY]));
   });
 
-  onCacheChange(scheduleCheck);
+  onCacheChange(kick);
   window.addEventListener('contextmenu', onContextMenu, true);
-  new MutationObserver(scheduleCheck).observe(document.body, {
-    childList: true,
-    subtree: true,
-    attributes: true,
-    attributeFilter: [EVENT_ID_ATTR],
-  });
 }
-
-void init();

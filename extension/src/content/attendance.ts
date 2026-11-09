@@ -16,11 +16,16 @@ import {
   applySortAndFilter,
   closeAnyOpenMenu,
   openChecklistMenu,
+  type BadgeView,
   type FactionKey,
   type ChecklistOption,
 } from './dom-inject';
 import type { Faction, RowMeta, AssignmentsMap, MessageType } from '../types';
-import { FACTIONS_ENABLED_KEY, FACTIONS_ENABLED_DEFAULT } from '../types';
+import { FLAGS } from '../settings';
+import { t } from '../i18n/factions';
+import { watchDom } from './shared/dom-watch';
+import { watchFlag } from './shared/ext-storage';
+import { errorText, toast } from './shared/ui';
 
 interface State {
   factions: Faction[];
@@ -28,7 +33,11 @@ interface State {
   rowsMeta: Map<HTMLTableRowElement, RowMeta>;
   sortDir: 'asc' | 'desc' | null; // cycles on the Faction header click
   filterFactionIds: Set<FactionKey>; // empty = show all
-  applying: boolean;
+  // Shared data: 'loading' until the first fetch settles; a later refresh
+  // that fails keeps the previous data.
+  status: 'loading' | 'ready' | 'error';
+  error: string;
+  saving: Map<string, number | null>; // email -> faction id of an in-flight assignment write
 }
 
 const state: State = {
@@ -37,11 +46,14 @@ const state: State = {
   rowsMeta: new Map(),
   sortDir: null,
   filterFactionIds: new Set(),
-  applying: false,
+  status: 'loading',
+  error: '',
+  saving: new Map(),
 };
 
 let activeTable: HTMLTableElement | null = null;
-let tbodyObserver: MutationObserver | null = null;
+let stopDom: (() => void) | null = null;
+let loadInFlight: Promise<void> | null = null;
 let theadClickListener: ((ev: MouseEvent) => void) | null = null;
 let factionHeaderEl: HTMLTableCellElement | null = null;
 
@@ -62,7 +74,7 @@ function sendMessage<T>(type: MessageType, payload: unknown = {}): Promise<T> {
 // Promotion/Registration date, no Attendance tracking at all). Rather than
 // hardcode every combination, match on the "Student" column alone — but by
 // its *content* (an email-shaped <p> in the first cell, same signal
-// buildRowMeta/findMemberContainers already use), not by the header text.
+// buildRowMeta and the member cards already use), not by the header text.
 // The site's own UI is localized (e.g. French), which renders "Student" as
 // something else entirely — matching header text broke the whole feature on
 // non-English UIs; email addresses aren't translated. A page can have more
@@ -77,22 +89,38 @@ function sendMessage<T>(type: MessageType, payload: unknown = {}): Promise<T> {
 // around it, depending on the viewer's permissions on that page. Scan every
 // cell for the one holding an email-shaped <p> rather than assuming a fixed
 // position.
+const EMAIL = /\S+@\S+\.\S+/;
+
 function findStudentCell(tr: HTMLTableRowElement): HTMLTableCellElement | undefined {
   return Array.from(tr.querySelectorAll('td')).find((td) =>
-    Array.from(td.querySelectorAll('p')).some((p) => /\S+@\S+\.\S+/.test(p.textContent || '')),
+    Array.from(td.querySelectorAll('p')).some((p) => EMAIL.test(p.textContent || '')),
   );
 }
 
-function tableHasStudentRows(t: HTMLTableElement): boolean {
-  return Array.from(t.querySelectorAll<HTMLTableRowElement>('tbody tr')).some((tr) => {
-    if (tr.querySelector('td[colspan]')) return false; // placeholder row
-    return findStudentCell(tr) !== undefined;
-  });
+// One pass over every <p> per check instead of tables x rows x cells: the
+// email-shaped ones give both the candidate student tables (in a real
+// tbody row, not the colspan placeholder) and the member cards (outside
+// any table, leaf <p> only).
+function scanEmails(): { tables: HTMLTableElement[]; cards: HTMLElement[] } {
+  const tables = new Set<HTMLTableElement>();
+  const cards: HTMLElement[] = [];
+  for (const p of Array.from(document.querySelectorAll('p'))) {
+    if (!EMAIL.test(p.textContent || '')) continue;
+    const td = p.closest('td');
+    if (td) {
+      const tr = td.parentElement;
+      const table = td.closest('table');
+      if (tr instanceof HTMLTableRowElement && !isPlaceholderRow(tr) && td.closest('tbody') && table) tables.add(table);
+      continue;
+    }
+    if (p.children.length || p.closest('table')) continue;
+    const container = p.parentElement?.parentElement; // <p> -> name/email stack -> row (avatar + stack)
+    if (container instanceof HTMLElement) cards.push(container);
+  }
+  return { tables: [...tables], cards };
 }
 
-function findTable(): HTMLTableElement | undefined {
-  const tables = Array.from(document.querySelectorAll('table'));
-  const candidates = tables.filter(tableHasStudentRows);
+function pickTable(candidates: HTMLTableElement[]): HTMLTableElement | undefined {
   return candidates.find((t) => t.closest('[class*="mantine-Modal"]')) ?? candidates[0];
 }
 
@@ -157,34 +185,30 @@ function buildRowMeta(
   return null;
 }
 
+function badgeView(meta: RowMeta): BadgeView {
+  return {
+    status: state.status === 'ready' ? (state.saving.has(meta.email) ? 'busy' : 'ready') : state.status,
+    error: state.error,
+    faction: factionById(meta.factionId),
+    factions: state.factions,
+    onPick: (factionId) => onAssign(meta.email, factionId),
+  };
+}
+
 function refreshRowBadge(tr: HTMLTableRowElement, meta: RowMeta, insertAfter?: HTMLTableCellElement | null): void {
-  const faction = factionById(meta.factionId);
-  ensureRowCell(tr, meta.email, faction, state.factions, onAssign, insertAfter);
+  ensureRowCell(tr, badgeView(meta), insertAfter);
 }
 
 // Registered Groups cards (Projects pages): each leader/member row is a
 // name+email pair rendered as two plain <p> tags, same shape as a table's
-// Student cell, just not inside a <table>. Scoped to `!p.closest('table')`
-// so it never double-processes an actual table row using the same shape.
-function findMemberContainers(): HTMLElement[] {
-  const emailParagraphs = Array.from(document.querySelectorAll('p')).filter(
-    (p) => p.children.length === 0 && !p.closest('table') && /\S+@\S+\.\S+/.test(p.textContent || ''),
-  );
-  const containers: HTMLElement[] = [];
-  for (const p of emailParagraphs) {
-    const container = p.parentElement?.parentElement; // <p> -> name/email stack -> row (avatar + stack)
-    if (container instanceof HTMLElement) containers.push(container);
-  }
-  return containers;
-}
-
+// Student cell, just not inside a <table> (found by scanEmails, which skips
+// <p>s inside a table so an actual table row is never double-processed).
 function refreshMemberBadge(container: HTMLElement, meta: RowMeta): void {
-  const faction = factionById(meta.factionId);
-  ensureMemberBadge(container, meta.email, faction, state.factions, onAssign);
+  ensureMemberBadge(container, badgeView(meta));
 }
 
-function processMemberCards(): void {
-  for (const container of findMemberContainers()) {
+function processMemberCards(containers: HTMLElement[]): void {
+  for (const container of containers) {
     // See the matching comment in processRows: don't re-render an
     // already-marked card's badge on every mutation, only when onAssign()
     // actually changes it — this call runs on every body-wide mutation, so
@@ -263,7 +287,9 @@ function buildCsvRows(table: HTMLTableElement): string[][] {
     return (tr.children[idx] as HTMLElement | undefined)?.textContent?.trim() || '';
   };
 
-  const rows: string[][] = [['Student', 'Promotion', 'Registration date', 'Attendance', 'Faction']];
+  // Native export headers kept as-is (raw, untranslated, like the site's own
+  // CSV); only the added Faction column / its values follow the UI language.
+  const rows: string[][] = [['Student', 'Promotion', 'Registration date', 'Attendance', t('faction')]];
   const tbody = table.querySelector('tbody');
   if (!tbody) return rows;
 
@@ -275,7 +301,7 @@ function buildCsvRows(table: HTMLTableElement): string[][] {
       cellText(tr, promotionIdx),
       formatRegistrationDate(cellText(tr, registrationIdx)),
       formatAttendance(cellText(tr, attendanceIdx)),
-      meta && meta.factionId != null ? meta.factionName : 'Unassigned',
+      meta && meta.factionId != null ? meta.factionName : t('unassigned'),
     ]);
   }
 
@@ -294,7 +320,8 @@ function downloadCsv(rows: string[][]): void {
   document.body.appendChild(a);
   a.click();
   a.remove();
-  URL.revokeObjectURL(url);
+  // Deferred: Firefox can still be reading the blob right after click().
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
 function exportCsv(table: HTMLTableElement): void {
@@ -368,51 +395,55 @@ function processRows(table: HTMLTableElement): void {
   }
 }
 
-function applyFactionToEmail(email: string, factionId: number | null): void {
-  for (const [tr, meta] of state.rowsMeta.entries()) {
-    if (meta.email === email) {
-      meta.factionId = factionId;
-      meta.factionName = factionById(factionId)?.name || '';
-      refreshRowBadge(tr, meta);
+// Re-renders the badges of `email` (or of everyone when omitted, after a
+// data load) from state.assignments — only on genuine data change.
+function refreshBadges(email?: string): void {
+  for (const [map, render] of [
+    [state.rowsMeta, refreshRowBadge],
+    [memberRowsMeta, refreshMemberBadge],
+  ] as [Map<HTMLElement, RowMeta>, (node: HTMLElement, meta: RowMeta) => void][]) {
+    for (const [node, meta] of map) {
+      if (email !== undefined && meta.email !== email) continue;
+      if (!node.isConnected) {
+        map.delete(node);
+        continue;
+      }
+      meta.factionId = state.assignments[meta.email] ?? null;
+      meta.factionName = factionById(meta.factionId)?.name || '';
+      render(node, meta);
     }
   }
-  for (const [container, meta] of memberRowsMeta.entries()) {
-    if (meta.email === email) {
-      meta.factionId = factionId;
-      meta.factionName = factionById(factionId)?.name || '';
-      refreshMemberBadge(container, meta);
-    }
-  }
+  reapplySortAndFilter();
 }
 
 function onAssign(email: string, factionId: number | null): void {
   const previous = state.assignments[email] ?? null;
-  if (factionId == null) delete state.assignments[email];
-  else state.assignments[email] = factionId;
+  const setLocal = (id: number | null): void => {
+    if (id == null) delete state.assignments[email];
+    else state.assignments[email] = id;
+  };
+  setLocal(factionId);
+  state.saving.set(email, factionId);
+  refreshBadges(email);
 
-  applyFactionToEmail(email, factionId);
-  reapplySortAndFilter();
-
-  sendMessage('setAssignment', { email, factionId }).catch((err) => {
-    console.error('[Epitools] failed to save assignment, reverting', err);
-    if (previous == null) delete state.assignments[email];
-    else state.assignments[email] = previous;
-    applyFactionToEmail(email, previous);
-    reapplySortAndFilter();
-  });
+  sendMessage('setAssignment', { email, factionId })
+    .catch((err) => {
+      console.error('[Intrafeur] failed to save assignment, reverting', err);
+      setLocal(previous);
+      toast(t('saveFailed', { email, error: errorText(err) }), 'error');
+    })
+    .finally(() => {
+      state.saving.delete(email);
+      refreshBadges(email);
+    });
 }
 
 function reapplySortAndFilter(): void {
   const tbody = activeTable?.querySelector<HTMLTableSectionElement>('tbody');
   if (!tbody) return;
-
-  state.applying = true;
   applySortAndFilter(tbody, state.rowsMeta, {
     sortDir: state.sortDir,
     filterFactionIds: state.filterFactionIds,
-  });
-  queueMicrotask(() => {
-    state.applying = false;
   });
 }
 
@@ -424,7 +455,7 @@ function onFactionSortClick(): void {
 }
 
 function onFactionFilterClick(anchorEl: HTMLElement): void {
-  const options: ChecklistOption[] = [{ id: UNASSIGNED, name: 'Unassigned', color: '#888888' }, ...state.factions];
+  const options: ChecklistOption[] = [{ id: UNASSIGNED, name: t('unassigned'), color: '#888888' }, ...state.factions];
   openChecklistMenu(anchorEl, options, state.filterFactionIds, (id, checked) => {
     if (checked) state.filterFactionIds.add(id);
     else state.filterFactionIds.delete(id);
@@ -448,58 +479,53 @@ function onTheadClick(ev: MouseEvent): void {
   }
 }
 
-function observeRows(table: HTMLTableElement): MutationObserver | null {
-  const tbody = table.querySelector('tbody');
-  if (!tbody) return null;
-
-  const observer = new MutationObserver(() => {
-    if (state.applying) return;
-    processRows(table);
-    reapplySortAndFilter();
-  });
-  observer.observe(tbody, { childList: true, subtree: true, characterData: true });
-  return observer;
+// Refetched on every new table (the background caches it briefly), shared
+// by concurrent callers. Badges show a spinner until the first load settles.
+function loadSharedData(): Promise<void> {
+  loadInFlight ??= Promise.all([
+    sendMessage<Faction[]>('getFactions'),
+    sendMessage<AssignmentsMap>('getAssignments'),
+  ])
+    .then(([factions, assignments]) => {
+      state.factions = factions || [];
+      state.assignments = assignments || {};
+      // A reload can land while a write is in flight: keep the pending value.
+      for (const [email, id] of state.saving) {
+        if (id == null) delete state.assignments[email];
+        else state.assignments[email] = id;
+      }
+      state.status = 'ready';
+    })
+    .catch((err) => {
+      console.error('[Intrafeur] failed to load factions', err);
+      if (state.status !== 'ready') {
+        state.status = 'error';
+        state.error = errorText(err);
+      }
+    })
+    .finally(() => {
+      loadInFlight = null;
+      if (stopDom) refreshBadges();
+    });
+  return loadInFlight;
 }
 
-async function loadSharedData(): Promise<void> {
-  const [factions, assignments] = await Promise.all([
-    sendMessage<Faction[]>('getFactions').catch(() => []),
-    sendMessage<AssignmentsMap>('getAssignments').catch(() => ({})),
-  ]);
-  state.factions = factions || [];
-  state.assignments = assignments || {};
-}
-
-async function init(table: HTMLTableElement): Promise<void> {
+function attachTable(table: HTMLTableElement): void {
   activeTable = table;
   state.rowsMeta = new Map();
   state.sortDir = null;
   state.filterFactionIds = new Set();
-
-  await loadSharedData();
-
-  // The modal may have closed while we were awaiting the network calls.
-  if (activeTable !== table || !document.contains(table)) return;
-
-  processRows(table);
-  reapplySortAndFilter();
-  tbodyObserver = observeRows(table);
-
   const thead = table.querySelector('thead');
   if (thead) {
     theadClickListener = onTheadClick;
     thead.addEventListener('click', theadClickListener, true);
   }
+  void loadSharedData();
 }
 
 function teardown(): void {
-  if (tbodyObserver) {
-    tbodyObserver.disconnect();
-    tbodyObserver = null;
-  }
   if (theadClickListener && activeTable) {
-    const thead = activeTable.querySelector('thead');
-    if (thead) thead.removeEventListener('click', theadClickListener, true);
+    activeTable.querySelector('thead')?.removeEventListener('click', theadClickListener, true);
     theadClickListener = null;
   }
   closeAnyOpenMenu();
@@ -508,60 +534,43 @@ function teardown(): void {
   factionHeaderEl = null;
 }
 
+// Also covers the active table's own row re-renders (native sort, paging,
+// late hydration): processRows only touches unmarked rows and
+// applySortAndFilter is idempotent, so this settles after one pass.
 function check(): void {
-  const table = findTable();
+  const { tables, cards } = scanEmails();
+  const table = pickTable(tables);
   if (table && table !== activeTable) {
-    init(table);
+    if (activeTable) teardown();
+    attachTable(table);
   } else if (!table && activeTable) {
     teardown();
   }
-  processMemberCards();
+  if (activeTable) {
+    processRows(activeTable);
+    reapplySortAndFilter();
+  }
+  processMemberCards(cards);
 }
-
-// Debounced: MutationObserver already batches synchronous mutations into one
-// callback, but this observer spans the whole document (not scoped to one
-// table's tbody), so separate bursts of unrelated page activity could still
-// call check() far more often than needed. Coalescing into one scan per
-// animation frame is a cheap safety margin on top of the idempotency fix in
-// processRows/processMemberCards (what actually prevents a self-triggering
-// mutation loop).
-let scheduled = false;
-function scheduleCheck(): void {
-  if (scheduled) return;
-  scheduled = true;
-  requestAnimationFrame(() => {
-    scheduled = false;
-    check();
-  });
-}
-
-let bodyObserver: MutationObserver | null = null;
 
 // The Registrations table/modal and the Registered Groups cards can each
 // appear and disappear client-side (modal open/close, tab switches, SPA
-// navigation) without a page load, so this watches continuously rather than
-// waiting once. Pages with only cards (Projects) never hit the table branch,
-// hence the independent initial loadSharedData() rather than relying on
-// init() (which only fires once a table shows up) to have fetched anything.
-// Split out from module init (rather than an unconditional top-level call)
-// so the popup's "enable faction tagging" toggle can start/stop this live,
-// without needing a page reload either way.
+// navigation) without a page load, so this watches continuously. The popup
+// toggle starts/stops it live.
 function startWatching(): void {
-  if (bodyObserver) return; // already running
-  bodyObserver = new MutationObserver(scheduleCheck);
-  bodyObserver.observe(document.body, { childList: true, subtree: true });
-  loadSharedData().then(check);
+  if (stopDom) return;
+  void loadSharedData();
+  // characterData: row content is recycled in place by React.
+  stopDom = watchDom(check, { delay: 150, characterData: true });
 }
 
-// Reverses startWatching(): stops observing, and actively strips whatever's
-// currently injected (rather than just letting things be, since the whole
-// point of the toggle is for the page to look untouched again immediately).
-// The one thing this can't cleanly undo is the "Export to CSV" button's
-// relabeled aria-label / capture listener from hijackExportButton — safe to
-// leave as-is (a stale label at worst), a full reset needs a page refresh.
+// Reverses startWatching() and strips whatever's injected, so the page looks
+// untouched again immediately. The one thing this can't cleanly undo is the
+// "Export to CSV" button's relabeled aria-label / capture listener from
+// hijackExportButton — safe to leave (a stale label at worst).
 function stopWatching(): void {
-  bodyObserver?.disconnect();
-  bodyObserver = null;
+  stopDom?.();
+  stopDom = null;
 
   if (activeTable) {
     removeInjectedElements(activeTable);
@@ -576,28 +585,6 @@ function stopWatching(): void {
   memberRowsMeta.clear();
 }
 
-async function initFeatureToggle(): Promise<void> {
-  let stored: Record<string, unknown>;
-  try {
-    stored = await browser.storage.local.get({ [FACTIONS_ENABLED_KEY]: FACTIONS_ENABLED_DEFAULT });
-  } catch {
-    // Reloading the extension (chrome://extensions -> refresh) tears down
-    // its old runtime while any tab that already had this content script
-    // injected keeps running the old instance — every browser.* call it
-    // makes from then on throws "Extension context invalidated". There's no
-    // recovery from inside that dead instance; the tab just needs a refresh
-    // to pick up the new one, same as any other extension reload. Bail out
-    // quietly instead of surfacing an unhandled rejection in the console.
-    return;
-  }
-  if (stored[FACTIONS_ENABLED_KEY] !== false) startWatching();
-
-  browser.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== 'local' || !(FACTIONS_ENABLED_KEY in changes)) return;
-    const enabled = changes[FACTIONS_ENABLED_KEY].newValue !== false;
-    if (enabled) startWatching();
-    else stopWatching();
-  });
+export function init(): Promise<void> {
+  return watchFlag(FLAGS.factions, (enabled) => (enabled ? startWatching() : stopWatching()));
 }
-
-initFeatureToggle();

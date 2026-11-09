@@ -5,6 +5,8 @@
 // table's native filter inputs.
 import type { UnitFilterColumns } from '../types';
 import { buildIconSvg } from './dom-inject';
+import { t } from '../i18n/unit-filters';
+import { button, el, spinner } from './shared/ui';
 
 export type ColumnKey = keyof UnitFilterColumns;
 
@@ -38,7 +40,7 @@ const RESET_ICON_PATHS = ['M20 11a8.1 8.1 0 0 0 -15.5 -2m-.5 -4v4h4', 'M4 13a8.1
 // (table.closest('.mrt-table-paper')). The independent "Past units" table
 // below it is always [1] and must never be touched by this feature.
 export function findCurrentUnitsPaper(): HTMLElement | undefined {
-  return document.querySelectorAll<HTMLElement>('.mrt-table-paper')[0];
+  return document.querySelector<HTMLElement>('.mrt-table-paper') ?? undefined;
 }
 
 export function findColumnFilterInput(paper: HTMLElement, key: ColumnKey): HTMLInputElement | undefined {
@@ -112,7 +114,7 @@ export async function setComboboxValue(input: HTMLInputElement, desiredLabel: st
     // 4th button in the column's <th> alongside the filter/sort/menu ones.
     const clearBtn = input.closest('th')?.querySelector<HTMLButtonElement>('.mantine-InputClearButton-root');
     if (!clearBtn) {
-      console.warn('[Epitools] could not find clear button for combobox filter — leaving current value');
+      console.warn('[Intrafeur] could not find clear button for combobox filter — leaving current value');
       return false;
     }
     clearBtn.click();
@@ -161,7 +163,7 @@ export async function setComboboxValue(input: HTMLInputElement, desiredLabel: st
   const options = Array.from(listbox.querySelectorAll<HTMLElement>('[role="option"]'));
   const match = options.find((opt) => opt.textContent?.trim() === desiredLabel);
   if (!match) {
-    console.warn(`[Epitools] no exact option match for "${desiredLabel}" — leaving filter unchanged`);
+    console.warn(`[Intrafeur] no exact option match for "${desiredLabel}" — leaving filter unchanged`);
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     return false;
   }
@@ -214,6 +216,17 @@ export interface UnitFiltersToolbarCallbacks {
 
 const TOOLBAR_CLASS = 'epitools-unit-filters-toolbar';
 
+// `<prefix>-btn` button (hidden until needed) with a `<prefix>-icon` Tabler icon.
+function iconButton(prefix: string, iconPaths: string[], label: string, onClick: () => void): HTMLButtonElement {
+  const btn = button('', `${prefix}-btn`);
+  btn.style.display = 'none';
+  const icon = el('span', `${prefix}-icon`);
+  icon.appendChild(buildIconSvg(iconPaths));
+  btn.append(icon, label);
+  btn.addEventListener('click', () => onClick());
+  return btn;
+}
+
 export function ensureUnitFiltersToolbar(
   paper: HTMLElement,
   callbacks: UnitFiltersToolbarCallbacks,
@@ -223,44 +236,24 @@ export function ensureUnitFiltersToolbar(
 
   const toolbar = paper.querySelector('[class*="ToolbarInternalButtons"]');
   if (!toolbar) {
-    console.warn('[Epitools] could not find Current units toolbar to attach filter presets to');
+    console.warn('[Intrafeur] could not find Current units toolbar to attach filter presets to');
     return undefined;
   }
 
-  const wrap = document.createElement('div');
-  wrap.className = TOOLBAR_CLASS;
+  const wrap = el('div', TOOLBAR_CLASS);
 
-  const select = document.createElement('select');
-  select.className = 'epitools-unit-filters-select';
+  const select = el('select', 'epitools-unit-filters-select');
   select.addEventListener('change', () => callbacks.onSelect(select.value));
 
-  const saveBtn = document.createElement('button');
-  saveBtn.type = 'button';
-  saveBtn.className = 'epitools-unit-filters-save-btn';
-  saveBtn.style.display = 'none';
-  const iconWrap = document.createElement('span');
-  iconWrap.className = 'epitools-unit-filters-save-icon';
-  iconWrap.appendChild(buildIconSvg(SAVE_ICON_PATHS));
-  saveBtn.appendChild(iconWrap);
-  saveBtn.appendChild(document.createTextNode('Save filter'));
-  saveBtn.addEventListener('click', () => callbacks.onSave());
+  const saveBtn = iconButton('epitools-unit-filters-save', SAVE_ICON_PATHS, t('saveFilter'), callbacks.onSave);
 
   // Discards live, unsaved changes and re-drives the filters back to
   // whatever the selected preset itself holds — distinct from picking
   // "Default" (or another preset) from the select, which changes which
   // preset is selected; Reset keeps the current selection and just
   // reverts to it.
-  const resetBtn = document.createElement('button');
-  resetBtn.type = 'button';
-  resetBtn.className = 'epitools-unit-filters-reset-btn';
-  resetBtn.title = 'Reset filters to the selected preset';
-  resetBtn.style.display = 'none';
-  const resetIconWrap = document.createElement('span');
-  resetIconWrap.className = 'epitools-unit-filters-reset-icon';
-  resetIconWrap.appendChild(buildIconSvg(RESET_ICON_PATHS));
-  resetBtn.appendChild(resetIconWrap);
-  resetBtn.appendChild(document.createTextNode('Reset'));
-  resetBtn.addEventListener('click', () => callbacks.onReset());
+  const resetBtn = iconButton('epitools-unit-filters-reset', RESET_ICON_PATHS, t('reset'), callbacks.onReset);
+  resetBtn.title = t('resetTitle');
 
   wrap.appendChild(saveBtn);
   wrap.appendChild(resetBtn);
@@ -286,14 +279,8 @@ export function showTableLoader(paper: HTMLElement): void {
   if (!prevPosition) paper.dataset.epitoolsLoaderRestorePosition = '1';
   paper.style.position = paper.style.position || 'relative';
 
-  const overlay = document.createElement('div');
-  overlay.className = LOADER_CLASS;
-  const spinner = document.createElement('span');
-  spinner.className = 'epitools-unit-filters-loader-spinner';
-  overlay.appendChild(spinner);
-  const label = document.createElement('span');
-  label.textContent = 'Applying saved filter…';
-  overlay.appendChild(label);
+  const overlay = el('div', LOADER_CLASS);
+  overlay.appendChild(spinner(t('applying')));
   paper.appendChild(overlay);
 }
 
@@ -305,39 +292,6 @@ export function hideTableLoader(paper: HTMLElement): void {
   }
 }
 
-const CLEAR_WARNING_CLASS = 'epitools-unit-filters-clear-warning';
-
-// The site's own Semester/Campus filter has a confirmed bug: clicking its
-// native clear (x) button — the only way to unset a selected value — leaves
-// its internal filter state desynced from what's displayed, in ways that
-// vary (sometimes "No results found", sometimes the old filter silently
-// stays applied) regardless of how the click is triggered (a genuine manual
-// click reproduces it too). No in-place fix exists. Rather than silently
-// leave the user looking at a stuck/wrong table, surface it explicitly so
-// they know a plain page reload is what actually recovers it.
-export function showClearFilterWarning(anchor: HTMLElement): void {
-  document.querySelector(`.${CLEAR_WARNING_CLASS}`)?.remove();
-
-  const toast = document.createElement('div');
-  toast.className = CLEAR_WARNING_CLASS;
-  toast.textContent =
-    'This site has a known bug clearing Semester/Campus filters — if results look wrong, reload the page.';
-
-  const closeBtn = document.createElement('button');
-  closeBtn.type = 'button';
-  closeBtn.className = 'epitools-unit-filters-clear-warning-close';
-  closeBtn.textContent = '×';
-  closeBtn.addEventListener('click', () => toast.remove());
-  toast.appendChild(closeBtn);
-
-  document.body.appendChild(toast);
-  const rect = anchor.getBoundingClientRect();
-  toast.style.top = `${window.scrollY + rect.bottom + 6}px`;
-  toast.style.left = `${window.scrollX + rect.left}px`;
-
-  setTimeout(() => toast.remove(), 8000);
-}
-
 export function rebuildPresetOptions(
   toolbar: HTMLElement,
   presets: { id: string; name: string }[],
@@ -347,9 +301,8 @@ export function rebuildPresetOptions(
   if (!select) return;
   select.replaceChildren();
   for (const preset of presets) {
-    const opt = document.createElement('option');
+    const opt = el('option', undefined, preset.name);
     opt.value = preset.id;
-    opt.textContent = preset.name;
     select.appendChild(opt);
   }
   select.value = selectedId;

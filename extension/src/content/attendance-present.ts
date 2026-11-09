@@ -13,26 +13,21 @@
 //
 // The button is a deep clone of the native one (classes/structure only;
 // cloneNode carries no React fiber or listeners), recoloured green. A
-// two-click confirm replaces the native Mantine confirm modal.
-import { findFiberKey } from './fiber-extract';
+// two-click confirm replaces the native Mantine confirm modal. Toggle
+// mirrored onto <html data-epitools-attendance-present="on"> (FLAGS.attendancePresent).
+import { fiberOf, type Fiber } from './fiber-extract';
+import { cloneButton, dialogs, setButtonLabel } from './shared/mantine';
+import { datasetAttr, watchDom } from './shared/dom-watch';
+import { FLAGS, mirroredFlagOn } from '../settings';
+import { t } from '../i18n/attendance-present';
 
 const ATTR = 'data-epitools-mark-present';
-const LABEL = 'Mark remaining as present';
+// Own armed-state logic rather than ui.armable: render() rewrites the label
+// on every check and the confirm label carries the live count.
 const CONFIRM_MS = 4000;
 const ERROR_MS = 2500;
 // tabler user-check, same icon as the planning menu's "Mark present".
 const ICON_PATHS = ['M8 7a4 4 0 1 0 8 0a4 4 0 0 0 -8 0', 'M6 21v-2a4 4 0 0 1 4 -4h4', 'M15 19l2 2l4 -4'];
-
-interface Hook {
-  memoizedState?: unknown;
-  next?: Hook | null;
-}
-
-interface Fiber {
-  memoizedProps?: Record<string, unknown> | null;
-  memoizedState?: Hook | null;
-  return?: Fiber | null;
-}
 
 interface SetAttendanceMutation {
   mutate: (variables: {
@@ -47,10 +42,9 @@ interface Panel {
   mutation: SetAttendanceMutation;
 }
 
-function fiberOf(el: Element): Fiber | null | undefined {
-  const key = findFiberKey(el);
-  return key ? (el as unknown as Record<string, Fiber>)[key] : null;
-}
+// Stringifying every dialog button's handler on every check adds up: cache
+// the verdict per handler function (a re-render with a new closure re-checks).
+const nativeHandlers = new WeakMap<object, boolean>();
 
 // Matched by the i18n key in its handler, which survives both minification
 // and the French UI.
@@ -58,7 +52,13 @@ function isNativeButton(button: Element): boolean {
   let fiber = fiberOf(button);
   for (let depth = 0; fiber && depth < 5; depth++, fiber = fiber.return) {
     const onClick = fiber.memoizedProps?.onClick;
-    if (typeof onClick === 'function') return String(onClick).includes('mark remaining as absent');
+    if (typeof onClick !== 'function') continue;
+    let verdict = nativeHandlers.get(onClick);
+    if (verdict === undefined) {
+      verdict = String(onClick).includes('mark remaining as absent');
+      nativeHandlers.set(onClick, verdict);
+    }
+    return verdict;
   }
   return false;
 }
@@ -101,11 +101,6 @@ const armed = new WeakMap<HTMLButtonElement, number>();
 const busy = new WeakSet<HTMLButtonElement>();
 const errors = new WeakMap<HTMLButtonElement, string>();
 
-function setLabel(button: HTMLButtonElement, text: string): void {
-  const label = button.querySelector('.mantine-Button-label');
-  if (label && label.textContent !== text) label.textContent = text;
-}
-
 function setDisabled(button: HTMLButtonElement, disabled: boolean): void {
   if (button.disabled === disabled) return;
   button.disabled = disabled;
@@ -117,13 +112,21 @@ function render(button: HTMLButtonElement, native: Element): void {
   const panel = readPanel(native);
   const count = panel?.remaining.length ?? 0;
   const error = errors.get(button);
-  if (error !== undefined) setLabel(button, 'Error');
-  else if (busy.has(button)) setLabel(button, 'Marking…');
-  else if (armed.has(button)) setLabel(button, `Confirm: mark ${count} as present`);
-  else setLabel(button, LABEL);
-  if (error !== undefined) button.title = error;
-  else button.removeAttribute('title');
-  setDisabled(button, busy.has(button) || count === 0);
+  const isBusy = busy.has(button);
+  if (error !== undefined) setButtonLabel(button, t('error'));
+  else if (isBusy) setButtonLabel(button, t('marking'));
+  else if (armed.has(button)) setButtonLabel(button, t('confirm', { count }));
+  else setButtonLabel(button, t('label'));
+  if (error !== undefined) {
+    if (button.title !== error) button.title = error;
+  } else if (button.hasAttribute('title')) button.removeAttribute('title');
+  setDisabled(button, isBusy || count === 0);
+  // Spinner while the mutation runs (shared.css).
+  if (button.classList.contains('epitools-busy') !== isBusy) {
+    button.classList.toggle('epitools-busy', isBusy);
+    if (isBusy) button.setAttribute('aria-busy', 'true');
+    else button.removeAttribute('aria-busy');
+  }
 }
 
 function disarm(button: HTMLButtonElement): void {
@@ -155,7 +158,7 @@ async function onClick(button: HTMLButtonElement, native: Element): Promise<void
       dto: { records: panel.remaining.map((login) => ({ login, status: 'present' })) },
     });
   } catch (err) {
-    errors.set(button, err instanceof Error && err.message ? err.message : 'Attendance update failed');
+    errors.set(button, err instanceof Error && err.message ? err.message : t('failed'));
     window.setTimeout(() => {
       errors.delete(button);
       render(button, native);
@@ -166,21 +169,9 @@ async function onClick(button: HTMLButtonElement, native: Element): Promise<void
 }
 
 function buildButton(native: HTMLButtonElement): HTMLButtonElement {
-  const button = native.cloneNode(true) as HTMLButtonElement;
-  button.setAttribute(ATTR, '');
+  const button = cloneButton(native, ATTR, { paths: ICON_PATHS, name: 'user-check' });
   const style = button.getAttribute('style');
   if (style) button.setAttribute('style', style.replace(/--mantine-color-red-/g, '--mantine-color-green-'));
-  const svg = button.querySelector('svg');
-  if (svg) {
-    svg.setAttribute('class', 'tabler-icon tabler-icon-user-check');
-    svg.replaceChildren(
-      ...ICON_PATHS.map((d) => {
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        path.setAttribute('d', d);
-        return path;
-      }),
-    );
-  }
   button.addEventListener('click', (e) => {
     e.stopPropagation();
     // The native button is read at click time: React may have replaced it.
@@ -190,36 +181,37 @@ function buildButton(native: HTMLButtonElement): HTMLButtonElement {
   return button;
 }
 
+function removeAll(): void {
+  document.querySelectorAll(`[${ATTR}]`).forEach((b) => b.remove());
+}
+
 function check(): void {
+  if (!mirroredFlagOn(FLAGS.attendancePresent)) {
+    removeAll();
+    return;
+  }
   // Orphans: React dropped the native button (e.g. read-only) but not ours.
   document.querySelectorAll<HTMLButtonElement>(`[${ATTR}]`).forEach((b) => {
     const prev = b.previousElementSibling;
     if (!prev || prev.hasAttribute(ATTR) || !isNativeButton(prev)) b.remove();
   });
-  for (const native of Array.from(
-    document.querySelectorAll<HTMLButtonElement>(`section[role=dialog] button.mantine-Button-root:not([${ATTR}])`),
-  )) {
-    if (!isNativeButton(native)) continue;
-    let button = native.nextElementSibling as HTMLButtonElement | null;
-    if (!button?.hasAttribute(ATTR)) {
-      if (!readPanel(native)) continue;
-      button = buildButton(native);
-      native.after(button);
+  for (const dialog of dialogs()) {
+    for (const native of Array.from(
+      dialog.querySelectorAll<HTMLButtonElement>(`button.mantine-Button-root:not([${ATTR}])`),
+    )) {
+      if (!isNativeButton(native)) continue;
+      let button = native.nextElementSibling as HTMLButtonElement | null;
+      if (!button?.hasAttribute(ATTR)) {
+        if (!readPanel(native)) continue;
+        button = buildButton(native);
+        native.after(button);
+      }
+      render(button, native);
     }
-    render(button, native);
   }
 }
 
-let checkTimer: number | undefined;
-
-// Throttled, not debounced (see event-info.ts).
-function scheduleCheck(): void {
-  if (checkTimer !== undefined) return;
-  checkTimer = window.setTimeout(() => {
-    checkTimer = undefined;
-    check();
-  }, 150);
+export function init(): void {
+  // The popup toggle flips the mirrored attribute without any body mutation.
+  watchDom(check, { htmlAttributes: [datasetAttr(FLAGS.attendancePresent.mirror)] });
 }
-
-new MutationObserver(scheduleCheck).observe(document.body, { childList: true, subtree: true });
-check();

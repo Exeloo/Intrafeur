@@ -7,12 +7,15 @@
 // and React's fiber expandos on DOM nodes aren't visible from an isolated
 // world. Consequently this script must not use browser.* APIs, and must not
 // import webextension-polyfill. The per-browser toggle is mirrored onto
-// <html data-epitools-event-info="on"> by event-info-toggle.ts.
-import { extractPlanningEvent, type PlanningEvent } from './fiber-extract';
+// <html data-epitools-event-info="on"> (FLAGS.eventInfo).
+import { type PlanningEvent } from './fiber-extract';
+import { dialogEvent, dialogs, findUnitLink, foldAccents, modalHeader } from './shared/mantine';
+import { button as makeButton, flashLabel } from './shared/ui';
+import { datasetAttr, watchDom } from './shared/dom-watch';
+import { FLAGS, mirroredFlagOn } from '../settings';
+import { t } from '../i18n/event-info';
 
 const BUTTON_CLASS = 'epitools-copy-info-btn';
-const BUTTON_LABEL = 'Copy info';
-const FEEDBACK_MS = 1500;
 
 // Canonical event types, matched against the normalized (lowercased,
 // non-alphanumerics stripped) segments of the event title. French aliases
@@ -29,11 +32,7 @@ const EVENT_TYPES: { type: string; prefixes: string[] }[] = [
 ];
 
 function normalize(text: string): string {
-  return text
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '');
+  return foldAccents(text).replace(/[^a-z0-9]/g, '');
 }
 
 // "Kick-Off - C Pool Day 07" -> { type: 'kick-off', project: 'C Pool Day 07' }.
@@ -42,16 +41,12 @@ function parseTitle(title: string): { type: string; project: string } {
   const segments = title.split(' - ').map((s) => s.trim()).filter(Boolean);
   for (let i = 0; i < segments.length; i++) {
     const norm = normalize(segments[i]);
-    const match = EVENT_TYPES.find((t) => t.prefixes.some((p) => norm.startsWith(p)));
+    const match = EVENT_TYPES.find((e) => e.prefixes.some((p) => norm.startsWith(p)));
     if (match) {
       return { type: match.type, project: segments.filter((_, j) => j !== i).join(' - ') };
     }
   }
   return { type: '', project: title.trim() };
-}
-
-function findUnitLink(dialog: Element): HTMLAnchorElement | null {
-  return dialog.querySelector<HTMLAnchorElement>('a[href^="/units/"]');
 }
 
 function buildDescription(event: PlanningEvent, unitPath: string): string {
@@ -113,14 +108,10 @@ async function copyText(text: string, container: Element): Promise<boolean> {
   return Promise.race([write, timeout]);
 }
 
-function flashLabel(button: HTMLButtonElement, label: string): void {
-  button.textContent = label;
-  window.clearTimeout(Number(button.dataset.epitoolsTimer));
-  button.dataset.epitoolsTimer = String(
-    window.setTimeout(() => {
-      button.textContent = BUTTON_LABEL;
-    }, FEEDBACK_MS),
-  );
+// Restarts from the base label so a double click can't make "Copied!" stick.
+function feedback(button: HTMLButtonElement, text: string): void {
+  button.textContent = t('copyInfo');
+  flashLabel(button, text);
 }
 
 async function onCopyClick(button: HTMLButtonElement): Promise<void> {
@@ -128,21 +119,19 @@ async function onCopyClick(button: HTMLButtonElement): Promise<void> {
   // modal DOM when the user opens another event.
   const dialog = button.closest('[role=dialog]');
   const unitLink = dialog ? findUnitLink(dialog) : null;
-  const event = unitLink ? extractPlanningEvent(unitLink) : null;
+  const event = dialog ? dialogEvent(dialog) : null;
   if (!dialog || !unitLink || !event) {
-    flashLabel(button, 'Copy failed');
+    feedback(button, t('copyFailed'));
     return;
   }
   const ok = await copyText(buildDescription(event, unitLink.getAttribute('href') || ''), dialog);
   button.focus();
-  flashLabel(button, ok ? 'Copied!' : 'Copy failed');
+  feedback(button, ok ? t('copied') : t('copyFailed'));
 }
 
 function buildButton(): HTMLButtonElement {
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = BUTTON_CLASS;
-  button.textContent = BUTTON_LABEL;
+  const button = makeButton(t('copyInfo'), BUTTON_CLASS);
+  button.title = t('copyTitle');
   button.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -151,44 +140,20 @@ function buildButton(): HTMLButtonElement {
   return button;
 }
 
-function isEnabled(): boolean {
-  return document.documentElement.dataset.epitoolsEventInfo === 'on';
-}
-
 function check(): void {
-  if (!isEnabled()) {
+  if (!mirroredFlagOn(FLAGS.eventInfo)) {
     document.querySelectorAll(`.${BUTTON_CLASS}`).forEach((b) => b.remove());
     return;
   }
-  for (const dialog of Array.from(document.querySelectorAll('section[role=dialog]'))) {
-    const closeButton = dialog.querySelector<HTMLElement>('.mantine-Modal-close');
-    const header = closeButton?.parentElement;
-    if (!closeButton || !header || header.querySelector(`.${BUTTON_CLASS}`)) continue;
-    const unitLink = findUnitLink(dialog);
-    if (!unitLink || !extractPlanningEvent(unitLink)) continue;
-    header.insertBefore(buildButton(), closeButton);
+  for (const dialog of dialogs()) {
+    const slot = modalHeader(dialog);
+    if (!slot || slot.header.querySelector(`.${BUTTON_CLASS}`)) continue;
+    if (!dialogEvent(dialog)) continue;
+    slot.header.insertBefore(buildButton(), slot.close);
   }
 }
 
-let debounceTimer: number | undefined;
-
-// Throttled, not debounced: run 150 ms after the first mutation and ignore
-// the next ones until then. The site rewrites its <style> tags every ~100 ms
-// on some views (e.g. planning with several semesters selected), so a
-// debounce that restarts on every mutation would starve check() forever.
-function scheduleCheck(): void {
-  if (debounceTimer !== undefined) return;
-  debounceTimer = window.setTimeout(() => {
-    debounceTimer = undefined;
-    check();
-  }, 150);
+export function init(): void {
+  // The popup toggle flips the mirrored attribute without any body mutation.
+  watchDom(check, { htmlAttributes: [datasetAttr(FLAGS.eventInfo.mirror)] });
 }
-
-new MutationObserver(scheduleCheck).observe(document.body, { childList: true, subtree: true });
-// The popup toggle flips this attribute (via event-info-toggle.ts) without
-// any body mutation; watch it so enabling/disabling applies live.
-new MutationObserver(scheduleCheck).observe(document.documentElement, {
-  attributes: true,
-  attributeFilter: ['data-epitools-event-info'],
-});
-check();

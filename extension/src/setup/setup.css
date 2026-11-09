@@ -1,0 +1,83 @@
+/* Setup wizard layout; shared tokens/components are in ../ui/pages.css. */
+.setup {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 40px 20px 64px;
+}
+
+.setup-header h1 {
+  font-size: 24px;
+}
+
+.stepper {
+  display: flex;
+  gap: 4px;
+  list-style: none;
+  margin: 8px 0 20px;
+  padding: 0;
+  counter-reset: none;
+}
+
+.stepper li {
+  flex: 1;
+}
+
+.stepper a {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 6px;
+  border-bottom: 3px solid var(--border);
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 13px;
+}
+
+.step-num {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.stepper .is-done a {
+  border-bottom-color: var(--success);
+}
+
+.stepper a[aria-current="step"] {
+  border-bottom-color: var(--accent);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.stepper a[aria-current="step"] .step-num {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.step > h2 {
+  font-size: 18px;
+}
+
+.step h2:focus {
+  outline: none;
+}
+
+.setup-footer {
+  display: flex;
+  justify-content: space-between;
+}
+
+.setup-footer #next {
+  margin-left: auto;
+}
+
+@media (max-width: 560px) {
+  .stepper a > span:not(.step-num) {
+    display: none;
+  }
+}
