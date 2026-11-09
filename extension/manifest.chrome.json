@@ -24,7 +24,7 @@
     },
     {
       "matches": ["https://my.epitech.eu/*"],
-      "js": ["content/event-info.js", "content/eval-sheet-page.js", "content/intrastek-page.js", "content/absence-status.js", "content/student-units.js"],
+      "js": ["content/event-info.js", "content/eval-sheet-page.js", "content/intrastek-page.js", "content/absence-status.js", "content/student-units.js", "content/attendance-present.js"],
       "css": ["content/event-info.css", "content/eval-sheet.css", "content/absence-status.css", "content/student-units.css"],
       "run_at": "document_idle",
       "world": "MAIN"

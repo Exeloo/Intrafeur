@@ -24,7 +24,7 @@ export interface RowOriginal {
   [key: string]: unknown;
 }
 
-function findFiberKey(domNode: Element): string | undefined {
+export function findFiberKey(domNode: Element): string | undefined {
   return Object.keys(domNode).find(
     (key) => key.startsWith('__reactFiber$') || key.startsWith('__reactInternalInstance$'),
   );

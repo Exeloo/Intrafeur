@@ -35,6 +35,7 @@ const ENTRY_POINTS = [
   { in: 'src/content/intrastek-page.ts', out: 'content/intrastek-page.js' },
   { in: 'src/content/absence-status.ts', out: 'content/absence-status.js' },
   { in: 'src/content/student-units.ts', out: 'content/student-units.js' },
+  { in: 'src/content/attendance-present.ts', out: 'content/attendance-present.js' },
   { in: 'src/content/hide-grades.ts', out: 'content/hide-grades.js' },
   { in: 'src/options/options.ts', out: 'options/options.js' },
   { in: 'src/popup/popup.ts', out: 'popup/popup.js' },
