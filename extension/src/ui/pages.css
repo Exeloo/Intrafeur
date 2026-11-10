@@ -418,6 +418,12 @@ a {
   align-items: flex-end;
   gap: 6px;
   flex-shrink: 0;
+  max-width: 40%;
+}
+
+/* A select is as wide as its longest option ("Par défaut (langue du navigateur)"); don't let it squeeze the text. */
+.flag-side .input--compact {
+  max-width: 100%;
 }
 
 .empty {
