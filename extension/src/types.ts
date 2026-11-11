@@ -24,7 +24,7 @@ export const EVAL_SHEET_ENABLED_DEFAULT = false;
 // Units page filter presets toggle — same storage.local reasoning. On by
 // default (purely local feature, no permission needed).
 export const UNIT_FILTERS_ENABLED_KEY = 'unitFiltersEnabled';
-export const UNIT_FILTERS_ENABLED_DEFAULT = true;
+export const UNIT_FILTERS_ENABLED_DEFAULT = false;
 
 // Attendance button on the student page's Absences tab — same storage.local
 // reasoning. On by default (it only calls the site's own API client).

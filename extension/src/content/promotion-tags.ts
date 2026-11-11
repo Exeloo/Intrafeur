@@ -10,11 +10,14 @@
 // Hiding really deselects the promotion through the selector's own onChange
 // (verified live 2026-11: URL updated by replace, no history entry), so every
 // page filters natively, even those that filter client-side (units). A
-// "ghost" copy of its tag (cloned from a real one, never React's) stays in
-// place, struck through, with an eye to select it again and a × to forget it.
-// Selections are per page section on the site (scheduler-/unit-/project-/
-// shared-filters), so the hidden list is too: page localStorage (the MAIN
-// world can't read extension storage), { [first path segment]: values[] }.
+// "ghost" copy of its tag (built by us, never React's) stays in place, struck
+// through, with an eye to select it again and a × to forget it.
+//
+// Shared between pages: the site keeps one selection per page section
+// (scheduler-/unit-/project-/shared-filters); we keep one for all of them
+// ({selected, hidden} in page localStorage: the MAIN world can't read
+// extension storage). A selector seen for the first time (page load,
+// navigation) takes the shared selection; every later change there is saved.
 //
 // Moving the tags/options among their siblings is safe (verified: React only
 // removes them / inserts relative to a sibling); we re-sort on the next check.
@@ -25,7 +28,7 @@ import { FLAGS, mirroredFlagOn } from '../settings';
 import { t } from '../i18n/promotion-tags';
 
 const PROMO_VALUE = /^[A-Za-z][\w-]*:\d{4}$/;
-const STORE_KEY = 'epitools-hidden-promotions';
+const STORE_KEY = 'epitools-promotions';
 const GHOST_ATTR = 'data-epitools-promo-ghost';
 // Colour by position in *our* list (hidden copies included), applied by CSS
 // !important: the site colours by position in its selection, so every tag
@@ -64,40 +67,37 @@ function selectorOf(el: Element, maxDepth: number): Selector | null {
   return null;
 }
 
-// --- Hidden list (page localStorage, per page section) ---
+// --- Shared state (page localStorage) ---
 
-function scope(): string {
-  return location.pathname.split('/')[1] || '';
+interface State {
+  /** Visible selection (null: never saved yet, the page keeps its own). */
+  selected: string[] | null;
+  hidden: string[];
 }
 
-function loadAll(): Record<string, string[]> {
+function promoList(v: unknown): string[] {
+  return Array.isArray(v) ? [...new Set(v.filter((x): x is string => typeof x === 'string' && PROMO_VALUE.test(x)))].slice(0, 50) : [];
+}
+
+function load(): State {
   try {
-    const raw: unknown = JSON.parse(localStorage.getItem(STORE_KEY) || '{}');
-    if (!raw || typeof raw !== 'object') return {};
-    const out: Record<string, string[]> = {};
-    for (const [k, v] of Object.entries(raw)) {
-      if (Array.isArray(v)) out[k] = v.filter((x): x is string => typeof x === 'string' && PROMO_VALUE.test(x)).slice(0, 50);
-    }
-    return out;
+    const raw = JSON.parse(localStorage.getItem(STORE_KEY) || '{}') as { selected?: unknown; hidden?: unknown } | null;
+    return { selected: Array.isArray(raw?.selected) ? promoList(raw.selected) : null, hidden: promoList(raw?.hidden) };
   } catch {
-    return {};
+    return { selected: null, hidden: [] };
   }
 }
 
-function hiddenList(): string[] {
-  return loadAll()[scope()] ?? [];
-}
-
-function setHidden(values: string[]): void {
-  const all = loadAll();
-  if (values.length) all[scope()] = [...new Set(values)];
-  else delete all[scope()];
+function save(patch: Partial<State>): void {
   try {
-    localStorage.setItem(STORE_KEY, JSON.stringify(all));
+    localStorage.setItem(STORE_KEY, JSON.stringify({ ...load(), ...patch }));
   } catch {
     // Storage blocked: the change only lasts until reload.
   }
 }
+
+const hiddenList = (): string[] => load().hidden;
+const setHidden = (hidden: string[]): void => save({ hidden: [...new Set(hidden)] });
 
 // --- Selection changes (one at a time per group, until React catches up) ---
 
@@ -261,9 +261,23 @@ function syncGroup(group: HTMLElement, sel: Selector): void {
   for (const chip of all) followColor(chip);
   if (busy(group, sel)) return;
 
-  // Hidden promotions found selected: on first sight (page load) deselect them;
-  // later, the user picked them from the dropdown, so they're shown again.
   const prev = seen.get(group);
+  if (!prev) {
+    // First sight (page load, navigation): this page takes the shared selection,
+    // as long as it knows some of it (another school year may not).
+    seen.set(group, sel.selected);
+    const { selected } = load();
+    if (selected && [...selected, ...hidden].some((v) => known.has(v))) {
+      const want = selected.filter((v) => known.has(v) && !hidden.includes(v));
+      if (setKey(want) !== setKey(sel.selected)) {
+        change(group, sel, want);
+        return;
+      }
+    }
+  }
+
+  // Hidden promotions found selected: on first sight deselect them; later,
+  // the user picked them from the dropdown, so they're shown again.
   const picked = sel.selected.filter((v) => hidden.includes(v));
   if (picked.length) {
     const added = prev ? picked.filter((v) => !prev.includes(v)) : [];
@@ -279,8 +293,12 @@ function syncGroup(group: HTMLElement, sel: Selector): void {
     }
   }
   seen.set(group, sel.selected);
+  // Settled: this is the selection now, for every page (values this page doesn't know are kept).
+  const saved = load().selected;
+  const next = [...(saved ?? []).filter((v) => !known.has(v)), ...sel.selected];
+  if (!saved || setKey(next) !== setKey(saved)) save({ selected: next });
 
-  // Real tags: eye to hide (not the last visible one).
+  // Real tags: eye to hide.
   const byLabel = new Map(sel.options.map((o) => [o.label, o.value]));
   for (const chip of real) {
     const value = byLabel.get(label(chip));
@@ -347,7 +365,7 @@ function check(): void {
     if (group && !group.closest('[role=dialog]')) groups.add(group);
   }
   // Every promotion hidden: no tag left, the row is found by its "Add" combobox trigger.
-  if (Object.keys(loadAll()).length) {
+  if (hiddenList().length) {
     for (const trigger of Array.from(document.querySelectorAll('.mantine-Group-root > button.mantine-UnstyledButton-root[aria-haspopup]'))) {
       const group = trigger.parentElement;
       if (group instanceof HTMLElement && !group.closest('[role=dialog]')) groups.add(group);
@@ -367,6 +385,12 @@ function check(): void {
 }
 
 export function init(): void {
+  // Former per-page hidden lists (before the shared state).
+  try {
+    localStorage.removeItem('epitools-hidden-promotions');
+  } catch {
+    // Storage blocked.
+  }
   // Short throttle: the tags re-colour as soon as one goes, the eyes must follow.
   watchDom(check, { delay: 50, htmlAttributes: [datasetAttr(FLAGS.promotionTags.mirror)] });
   // Another tab's eye button.
