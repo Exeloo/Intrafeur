@@ -64,8 +64,9 @@ export interface Span {
  * shares its lane count (equal widths). `minDuration` keeps very short
  * events (drawn taller than they are) from visually colliding.
  */
-export function layoutLanes(spans: Span[], minDuration = 20): Map<number, { lane: number; lanes: number }> {
-  const out = new Map<number, { lane: number; lanes: number }>();
+export function layoutLanes(spans: Span[], minDuration = 20): Map<number, { lane: number; lanes: number; cluster: number }> {
+  const out = new Map<number, { lane: number; lanes: number; cluster: number }>();
+  let clusterNo = 0;
   const sorted = spans
     .map((s) => ({ ...s, end: Math.max(s.end, s.start + minDuration) }))
     .sort((a, b) => a.start - b.start || b.end - a.end || a.id - b.id);
@@ -73,7 +74,8 @@ export function layoutLanes(spans: Span[], minDuration = 20): Map<number, { lane
   let laneEnds: number[] = [];
   let clusterEnd = -Infinity;
   const flush = (): void => {
-    for (const c of cluster) out.set(c.id, { lane: c.lane, lanes: laneEnds.length });
+    for (const c of cluster) out.set(c.id, { lane: c.lane, lanes: laneEnds.length, cluster: clusterNo });
+    if (cluster.length) clusterNo++;
     cluster = [];
     laneEnds = [];
   };
@@ -94,4 +96,20 @@ export function layoutLanes(spans: Span[], minDuration = 20): Map<number, { lane
   }
   flush();
   return out;
+}
+
+/**
+ * Hover fisheye over a cluster's lanes: the hovered lane gets 4 shares, its
+ * neighbours 2, every other lane 1. Returns each lane's [left, width] as
+ * fractions of the column.
+ */
+export function fisheyeLanes(lanes: number, hovered: number): [number, number][] {
+  const w = Array.from({ length: lanes }, (_, i) => (i === hovered ? 4 : Math.abs(i - hovered) === 1 ? 2 : 1));
+  const total = w.reduce((a, b) => a + b, 0);
+  let left = 0;
+  return w.map((x) => {
+    const r: [number, number] = [left / total, x / total];
+    left += x;
+    return r;
+  });
 }

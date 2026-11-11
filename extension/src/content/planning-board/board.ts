@@ -49,7 +49,7 @@ import {
 } from '../intrastek-client';
 import { mountBulkEditor, mountEventEditor } from '../intrastek-ui';
 import { INTRASTEK_API_KEY_KEY, INTRASTEK_API_URL_KEY, INTRASTEK_DEFAULT_GROUP_KEY } from '../../types';
-import { layoutLanes, parisClock, parisToIso, timeToMinutes, viewDays } from './layout';
+import { fisheyeLanes, layoutLanes, parisClock, parisToIso, timeToMinutes, viewDays } from './layout';
 import {
   ACTIVE_DATASET_KEY,
   COMMAND_SOURCE,
@@ -71,6 +71,10 @@ const DRAG_THRESHOLD_PX = 5;
 const IK_BUTTON_ATTR = 'data-epitools-ik-mode';
 const ID_ATTR = 'data-pb-id';
 const DAY_ATTR = 'data-pb-day';
+const AGENDA_ATTR = 'data-pb-agenda';
+// "cluster:lane:lanes" on cards of crowded clusters (hover fisheye).
+const LANE_ATTR = 'data-pb-lane';
+const FISHEYE_MIN_LANES = 3;
 // The site's ActionIcon variables, filled / default (captured live 2026-11).
 const AI_STYLE = {
   on: '--ai-size: calc(2.25rem * var(--mantine-scale)); --ai-radius: 0rem; --ai-bg: var(--mantine-color-blue-filled); --ai-hover: var(--mantine-color-blue-filled-hover); --ai-color: var(--mantine-color-blue-contrast); --ai-bd: calc(0.0625rem * var(--mantine-scale)) solid transparent;',
@@ -102,6 +106,8 @@ let feedVersion = 0;
 let ikVersion = 0;
 let statusError = '';
 let search = '';
+// Day whose agenda (list of all its events) is open under the day header.
+let agendaDay: string | null = null;
 const selected = new Set<number>();
 
 // --- DOM ---
@@ -345,6 +351,8 @@ function buildRoot(): HTMLElement {
   });
   grid.addEventListener('keydown', onGridKey);
   grid.addEventListener('pointerdown', onGridPointerDown);
+  grid.addEventListener('pointerover', onGridHover);
+  grid.addEventListener('pointerleave', () => setFisheye(null));
   return node;
 }
 
@@ -502,7 +510,7 @@ function render(): void {
   const lang = currentLang();
   const target = currentTarget();
   const sel = Array.from(selected).join(',');
-  const g = `${feedVersion}|${sel}|${search}|${ikVersion}|${target}|${lang}|${ikOn()}`;
+  const g = `${feedVersion}|${sel}|${search}|${agendaDay}|${ikVersion}|${target}|${lang}|${ikOn()}`;
   if (g !== gridSig) {
     gridSig = g;
     renderGrid();
@@ -578,10 +586,22 @@ function renderGrid(): void {
     const cell = el('div', `epitools-pb-day${day === today.day ? ' epitools-pb-day--today' : ''}`);
     cell.setAttribute('role', 'columnheader');
     const count = byDay.get(day)?.length ?? 0;
+    if (count) {
+      // Crowded days are hard to read in the grid: the header opens a plain list.
+      cell.setAttribute(AGENDA_ATTR, day);
+      cell.tabIndex = 0;
+      cell.title = t('agendaOpen');
+      cell.setAttribute('aria-expanded', String(agendaDay === day));
+      cell.classList.add('epitools-pb-day--agenda');
+    }
     cell.append(el('span', 'epitools-pb-day-name', dayFmt.format(date)), el('span', 'epitools-pb-day-num', String(date.getUTCDate())));
     if (count) cell.appendChild(el('span', 'epitools-pb-day-count', String(count)));
     head.appendChild(cell);
   }
+
+  if (agendaDay && !days.includes(agendaDay)) agendaDay = null;
+  const agenda = agendaDay ? renderAgenda(agendaDay, byDay.get(agendaDay) ?? [], query) : null;
+  if (agenda) head.appendChild(agenda);
 
   const body = el('div', 'epitools-pb-body');
   body.style.height = `${height}px`;
@@ -600,14 +620,18 @@ function renderGrid(): void {
     col.setAttribute('role', 'gridcell');
     col.setAttribute(DAY_ATTR, day);
     const placed = byDay.get(day) ?? [];
-    const lanes = dayLanes.get(day) ?? new Map<number, { lane: number; lanes: number }>();
+    const lanes = dayLanes.get(day) ?? new Map<number, { lane: number; lanes: number; cluster: number }>();
     for (const p of placed) {
-      const lane = lanes.get(p.e.id) ?? { lane: 0, lanes: 1 };
+      const lane = lanes.get(p.e.id) ?? { lane: 0, lanes: 1, cluster: -1 };
       const card = renderCard(p.e, p.start, p.end, !matches(p.e, query));
       card.style.top = `${(p.start - minM) * PX_PER_MIN}px`;
       card.style.height = `${Math.max((p.end - p.start) * PX_PER_MIN, MIN_CARD_PX) - 2}px`;
       card.style.left = `calc(${(lane.lane / lane.lanes) * 100}% + 1px)`;
       card.style.width = `calc(${100 / lane.lanes}% - 3px)`;
+      if (lane.lanes >= FISHEYE_MIN_LANES) {
+        card.setAttribute(LANE_ATTR, `${lane.cluster}:${lane.lane}:${lane.lanes}`);
+        card.classList.add('epitools-pb-card--lane');
+      }
       col.appendChild(card);
     }
     if (day === today.day) {
@@ -623,8 +647,108 @@ function renderGrid(): void {
   grid.replaceChildren(...children);
   // After the line is in the DOM (placed and hidden outside the visible hours).
   placeNowLine();
+  if (agenda) {
+    // Under its day, kept inside the board.
+    const cell = head.querySelector<HTMLElement>(`[${AGENDA_ATTR}="${agendaDay}"]`);
+    if (cell) agenda.style.left = `${Math.max(0, Math.min(cell.offsetLeft, head.clientWidth - agenda.offsetWidth))}px`;
+  }
   if (focusedId) grid.querySelector<HTMLElement>(`[${ID_ATTR}="${focusedId}"]`)?.focus({ preventScroll: true });
   if (drag?.active) drawGhost();
+}
+
+function renderAgenda(day: string, placed: { e: BoardEvent; start: number; end: number }[], query: string): HTMLElement {
+  const box = el('div', 'epitools-pb-agenda');
+  box.setAttribute('role', 'dialog');
+  const dayFmt = new Intl.DateTimeFormat(currentLocale(), { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' });
+  const top = el('div', 'epitools-pb-agenda-head');
+  const close = el('button', 'epitools-pb-agenda-close', '×');
+  close.type = 'button';
+  close.title = t('agendaClose');
+  close.setAttribute('aria-label', t('agendaClose'));
+  close.setAttribute(AGENDA_ATTR, day);
+  top.append(el('span', '', t('agendaTitle', { day: dayFmt.format(new Date(`${day}T12:00:00Z`)), n: placed.length })), close);
+  const list = el('div', 'epitools-pb-agenda-list');
+  const sorted = [...placed].sort((a, b) => a.start - b.start || a.end - b.end || a.e.title.localeCompare(b.e.title));
+  for (const p of sorted) {
+    const e = p.e;
+    // Same id attribute as the cards: clicks, Enter and Space behave the same.
+    const row = el('div', 'epitools-pb-agenda-row');
+    row.setAttribute(ID_ATTR, String(e.id));
+    row.setAttribute('role', 'button');
+    row.tabIndex = 0;
+    if (e.color) row.style.setProperty('--pb-color', e.color);
+    if (selected.has(e.id)) row.classList.add('epitools-pb-agenda-row--selected');
+    if (!matches(e, query)) row.classList.add('epitools-pb-card--dimmed');
+    const ik = ikOf(e.id);
+    if (ik) row.classList.add(`epitools-pb-agenda-row--ik-${ik.state}`);
+    const main = el('div', 'epitools-pb-agenda-main');
+    const titleLine = el('div', 'epitools-pb-agenda-title', e.title || e.unitName || `#${e.id}`);
+    if (e.draft) titleLine.appendChild(el('span', 'epitools-pb-draft', t('draft')));
+    if (ik && ik.state !== 'none') titleLine.appendChild(ikBadge(ik));
+    main.appendChild(titleLine);
+    const meta = [e.unitCode, e.rooms.join(', '), e.instructors.join(', ')].filter(Boolean).join(' · ');
+    if (meta) main.appendChild(el('div', 'epitools-pb-agenda-meta', meta));
+    const regs = e.registrations !== null ? (e.capacity ? `${e.registrations}/${e.capacity}` : String(e.registrations)) : '';
+    row.append(el('span', 'epitools-pb-agenda-time', `${hhmm(p.start)}–${hhmm(p.end)}`), main, el('span', 'epitools-pb-agenda-regs', regs));
+    row.setAttribute('aria-label', [e.title, `${hhmm(p.start)}–${hhmm(p.end)}`, meta, regs].filter(Boolean).join(', '));
+    list.appendChild(row);
+  }
+  box.append(top, list);
+  return box;
+}
+
+// A click anywhere outside the agenda (and its day header, which toggles it) closes it.
+// The site's event modal opened from a row doesn't count: the list stays for the next one.
+function onDocClick(ev: MouseEvent): void {
+  if (!agendaDay) return;
+  const target = ev.target as Element;
+  if (!target.isConnected || target.closest(`.epitools-pb-agenda, [${AGENDA_ATTR}], section[role=dialog]`)) return;
+  agendaDay = null;
+  schedule();
+}
+
+function toggleAgenda(day: string): void {
+  agendaDay = agendaDay === day ? null : day;
+  schedule();
+}
+
+// Hover fisheye: in a crowded cluster the hovered card widens, its lane
+// neighbours a bit, the other lanes shrink. Only inline left/width change,
+// and the next render (or leaving the cluster) puts the even split back.
+let fisheyeCard: HTMLElement | null = null;
+
+function placeLane(card: HTMLElement, left: number, width: number): void {
+  card.style.left = `calc(${left * 100}% + 1px)`;
+  card.style.width = `calc(${width * 100}% - 3px)`;
+}
+
+function clusterCards(card: HTMLElement): HTMLElement[] {
+  const cluster = card.getAttribute(LANE_ATTR)?.split(':')[0];
+  return Array.from(card.parentElement?.querySelectorAll<HTMLElement>(`[${LANE_ATTR}]`) ?? []).filter((c) => c.getAttribute(LANE_ATTR)?.split(':')[0] === cluster);
+}
+
+function setFisheye(card: HTMLElement | null): void {
+  if (card === fisheyeCard) return;
+  if (fisheyeCard?.isConnected) {
+    for (const c of clusterCards(fisheyeCard)) {
+      const [, lane, lanes] = (c.getAttribute(LANE_ATTR) ?? '').split(':').map(Number);
+      placeLane(c, lane / lanes, 1 / lanes);
+    }
+  }
+  fisheyeCard = card;
+  if (!card) return;
+  const [, hovered, lanes] = (card.getAttribute(LANE_ATTR) ?? '').split(':').map(Number);
+  const shares = fisheyeLanes(lanes, hovered);
+  for (const c of clusterCards(card)) {
+    const lane = Number(c.getAttribute(LANE_ATTR)?.split(':')[1]);
+    if (shares[lane]) placeLane(c, ...shares[lane]);
+  }
+}
+
+function onGridHover(ev: PointerEvent): void {
+  if (drag?.active || ev.pointerType === 'touch') return;
+  // Off a card (even onto the empty column): back to the even split.
+  setFisheye((ev.target as Element).closest<HTMLElement>(`.epitools-pb-col [${LANE_ATTR}]`));
 }
 
 function placeNowLine(): void {
@@ -1021,6 +1145,11 @@ function clearSelection(): void {
 
 function onGridClick(ev: MouseEvent): void {
   if (Date.now() < suppressClickUntil) return;
+  const dayCell = (ev.target as Element).closest<HTMLElement>(`[${AGENDA_ATTR}]`);
+  if (dayCell) {
+    toggleAgenda(dayCell.getAttribute(AGENDA_ATTR) ?? '');
+    return;
+  }
   const card = (ev.target as Element).closest<HTMLElement>(`[${ID_ATTR}]`);
   if (!card) {
     // Click on the empty grid: deselect.
@@ -1047,6 +1176,12 @@ function onGridClick(ev: MouseEvent): void {
 }
 
 function onGridKey(ev: KeyboardEvent): void {
+  const dayCell = (ev.target as Element).closest<HTMLElement>(`.epitools-pb-day[${AGENDA_ATTR}]`);
+  if (dayCell && (ev.key === 'Enter' || ev.key === ' ')) {
+    ev.preventDefault();
+    toggleAgenda(dayCell.getAttribute(AGENDA_ATTR) ?? '');
+    return;
+  }
   const card = (ev.target as Element).closest<HTMLElement>(`[${ID_ATTR}]`);
   if (!card) return;
   const id = Number(card.getAttribute(ID_ATTR));
@@ -1221,7 +1356,12 @@ function onKey(ev: KeyboardEvent): void {
   // A modal or menu owns the keyboard (the site's event modal is a section[role=dialog]).
   if (document.querySelector('section[role=dialog], .epitools-menu')) return;
   const typing = ev.target instanceof HTMLElement && (ev.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(ev.target.tagName));
-  if (ev.key === 'Escape' && !typing) clearSelection();
+  if (ev.key === 'Escape' && !typing) {
+    if (agendaDay) {
+      agendaDay = null;
+      schedule();
+    } else clearSelection();
+  }
   if (ev.key === '/' && !typing && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
     ev.preventDefault();
     searchInput.focus();
@@ -1315,6 +1455,7 @@ export async function init(): Promise<void> {
   });
   window.addEventListener('message', onMessage);
   window.addEventListener('keydown', onKey, true);
+  document.addEventListener('click', onDocClick, true);
   document.addEventListener('pointermove', onPointerMove, true);
   document.addEventListener('pointerup', onPointerUp, true);
   document.addEventListener('pointercancel', cancelDrag, true);

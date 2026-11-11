@@ -832,3 +832,108 @@ html.epitools-pb-dragging .epitools-pb-card {
   .epitools-pb-card:hover,
   .epitools-pb-card:active { transform: none; }
 }
+
+/* Day agenda: every event of one day as a list, under its header (crowded days). */
+.epitools-pb-day--agenda { cursor: pointer; }
+.epitools-pb-day--agenda:hover,
+.epitools-pb-day--agenda[aria-expanded="true"] { background: var(--pb-surface); }
+.epitools-pb-day--agenda:focus-visible { outline: 2px solid var(--pb-accent); outline-offset: -2px; }
+
+.epitools-pb-agenda {
+  position: absolute;
+  top: 100%;
+  z-index: 7;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: min(460px, 100%);
+  max-height: calc(100vh - var(--app-shell-header-offset, 0px) - 90px);
+  border: 1px solid var(--pb-border);
+  border-radius: 6px;
+  background: var(--mantine-color-body, #242424);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  color: var(--pb-text);
+  font-size: 12px;
+}
+
+.epitools-pb-agenda-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--pb-border);
+  font-weight: 700;
+}
+
+.epitools-pb-agenda-close {
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--pb-dim);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.epitools-pb-agenda-close:hover { background: var(--pb-surface); color: var(--pb-text); }
+
+.epitools-pb-agenda-list {
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.epitools-pb-agenda-row {
+  --pb-color: #5c7cfa;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 8px;
+  border-left: 3px solid var(--pb-color);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.epitools-pb-agenda-row + .epitools-pb-agenda-row { margin-top: 2px; }
+.epitools-pb-agenda-row:hover,
+.epitools-pb-agenda-row:focus-visible {
+  outline: none;
+  background: color-mix(in srgb, var(--pb-color) 28%, var(--mantine-color-body, #242424));
+}
+.epitools-pb-agenda-row--selected { box-shadow: inset 0 0 0 2px var(--pb-accent); }
+.epitools-pb-agenda-row--ik-initialized { border-left-color: var(--mantine-color-green-6, #40c057); }
+.epitools-pb-agenda-row--ik-proposed { border-left-style: dashed; border-left-color: var(--mantine-color-orange-6, #fd7e14); }
+
+.epitools-pb-agenda-time,
+.epitools-pb-agenda-regs {
+  color: var(--pb-dim);
+  font: 11px var(--mantine-font-family-monospace, monospace);
+  white-space: nowrap;
+}
+
+.epitools-pb-agenda-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  font-weight: 600;
+}
+
+.epitools-pb-agenda-meta {
+  overflow: hidden;
+  color: var(--pb-dim);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Hover fisheye in crowded clusters (board.ts setFisheye): left/width animate. */
+.epitools-pb-card--lane {
+  transition:
+    left 160ms var(--pb-ease),
+    width 160ms var(--pb-ease),
+    background-color 150ms var(--pb-ease),
+    box-shadow 160ms var(--pb-ease),
+    opacity 180ms var(--pb-ease),
+    transform 160ms var(--pb-ease),
+    filter 150ms var(--pb-ease);
+}
+html.epitools-pb-dragging .epitools-pb-card--lane { transition: none; }

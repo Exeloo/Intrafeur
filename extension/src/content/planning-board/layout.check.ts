@@ -1,6 +1,6 @@
 // Self-check for layout.ts (the repo has no test runner):
 //   npx esbuild src/content/planning-board/layout.check.ts --bundle --platform=node | node
-import { layoutLanes, parisClock, parisToIso, timeToMinutes, viewDays } from './layout';
+import { fisheyeLanes, layoutLanes, parisClock, parisToIso, timeToMinutes, viewDays } from './layout';
 
 const assert = {
   deepEqual(actual: unknown, expected: unknown): void {
@@ -48,15 +48,19 @@ const lanes = layoutLanes([
   { id: 3, start: 720, end: 750 }, // C 12:00-12:30 -> reuses A's lane
   { id: 4, start: 900, end: 960 }, // D alone
 ]);
-assert.deepEqual(lanes.get(1), { lane: 0, lanes: 2 });
-assert.deepEqual(lanes.get(2), { lane: 1, lanes: 2 });
-assert.deepEqual(lanes.get(3), { lane: 0, lanes: 2 });
-assert.deepEqual(lanes.get(4), { lane: 0, lanes: 1 });
+assert.deepEqual(lanes.get(1), { lane: 0, lanes: 2, cluster: 0 });
+assert.deepEqual(lanes.get(2), { lane: 1, lanes: 2, cluster: 0 });
+assert.deepEqual(lanes.get(3), { lane: 0, lanes: 2, cluster: 0 });
+assert.deepEqual(lanes.get(4), { lane: 0, lanes: 1, cluster: 1 });
 // Back to back is not an overlap.
-assert.deepEqual(layoutLanes([{ id: 1, start: 0, end: 60 }, { id: 2, start: 60, end: 120 }]).get(2), { lane: 0, lanes: 1 });
+assert.deepEqual(layoutLanes([{ id: 1, start: 0, end: 60 }, { id: 2, start: 60, end: 120 }]).get(2), { lane: 0, lanes: 1, cluster: 1 });
 // A 5-minute event still blocks 20 minutes.
-assert.deepEqual(layoutLanes([{ id: 1, start: 0, end: 5 }, { id: 2, start: 10, end: 30 }]).get(2), { lane: 1, lanes: 2 });
+assert.deepEqual(layoutLanes([{ id: 1, start: 0, end: 5 }, { id: 2, start: 10, end: 30 }]).get(2), { lane: 1, lanes: 2, cluster: 0 });
 // Three identical events: three lanes.
 assert.equal(layoutLanes([1, 2, 3].map((id) => ({ id, start: 0, end: 60 }))).get(3)?.lanes, 3);
+// Fisheye: 5 lanes, lane 2 hovered -> shares 1,2,4,2,1 of 10.
+assert.deepEqual(fisheyeLanes(5, 2).map(([, w]) => w), [0.1, 0.2, 0.4, 0.2, 0.1]);
+assert.deepEqual(fisheyeLanes(5, 0).map(([l]) => l), [0, 4 / 9, 6 / 9, 7 / 9, 8 / 9]);
+assert.deepEqual(fisheyeLanes(1, 0), [[0, 1]]);
 
 (globalThis as { console?: { log(m: string): void } }).console?.log('layout.check: ok');
