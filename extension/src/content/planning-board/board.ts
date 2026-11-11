@@ -966,55 +966,31 @@ function roomsEditor(picked: BoardEvent[]): HTMLElement {
     wrap.appendChild(el('p', 'epitools-pb-muted', t('roomsUnavailable')));
     return wrap;
   }
-  const input = el('input', 'epitools-pb-input');
-  input.type = 'text';
-  input.placeholder = t('roomAdd');
-  input.setAttribute('aria-label', t('roomAdd'));
-  input.disabled = roomsBusy;
-  const listId = 'epitools-pb-rooms-list';
-  input.setAttribute('list', listId);
-  const datalist = el('datalist');
-  datalist.id = listId;
+  // A native select, not an <input list>: Firefox's datalist doesn't open on click.
+  const select = el('select', 'epitools-pb-select');
+  select.setAttribute('aria-label', t('roomAdd'));
+  select.disabled = roomsBusy;
+  select.appendChild(el('option', undefined, t('roomAdd'))).value = '';
   for (const r of rooms) {
-    const opt = el('option');
-    opt.value = r.name;
-    if (r.capacity !== null) opt.label = t('roomSeats', { n: r.capacity });
-    datalist.appendChild(opt);
+    // Already on every selected event (and not staged for removal), or staged: nothing to add.
+    if (staged.add.has(r.id) || (!staged.remove.has(r.id) && picked.every((e) => e.roomIds.includes(r.id)))) continue;
+    const opt = el('option', undefined, r.capacity !== null ? `${r.name} (${t('roomSeats', { n: r.capacity })})` : r.name);
+    opt.value = String(r.id);
+    select.appendChild(opt);
   }
-  const add = (): void => {
-    const q = input.value.trim().toLowerCase();
-    if (!q) return;
-    const room = rooms.find((r) => r.name.toLowerCase() === q);
-    if (!room) {
-      toast(t('roomUnknown', { name: input.value.trim() }), 'error');
-      return;
-    }
-    input.value = '';
+  select.addEventListener('change', () => {
+    const room = rooms.find((r) => String(r.id) === select.value);
+    if (!room) return;
     // Re-adding a room staged for removal just cancels the removal.
-    if (staged.remove.delete(room.id)) {
-      rerender();
-    } else if (picked.every((e) => e.roomIds.includes(room.id))) {
-      toast(t('roomAlready', { name: room.name }), 'info');
-      return;
-    } else {
-      staged.add.set(room.id, room.name);
-      rerender();
-    }
-    // Keep typing the next one.
+    if (!staged.remove.delete(room.id)) staged.add.set(room.id, room.name);
+    // Keep picking the next one.
     refocusRoomInput = true;
-  };
-  // A datalist pick fires `change`; Enter adds what's typed.
-  input.addEventListener('change', add);
-  input.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Enter') {
-      ev.preventDefault();
-      add();
-    }
+    rerender();
   });
-  wrap.append(input, datalist);
+  wrap.appendChild(select);
   if (refocusRoomInput && !roomsBusy) {
     refocusRoomInput = false;
-    setTimeout(() => input.isConnected && input.focus(), 0);
+    setTimeout(() => select.isConnected && select.focus(), 0);
   }
 
   const pending = staged.add.size + staged.remove.size;

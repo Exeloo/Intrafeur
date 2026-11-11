@@ -35,11 +35,60 @@ export function findFiberKey(domNode: Element): string | undefined {
   );
 }
 
-// Its chain of `return`s ends at the HostRoot that its FiberRoot calls current.
-function inCurrentTree(fiber: Fiber): boolean {
-  let top = fiber;
-  for (let i = 0; top.return && i < 5000; i++) top = top.return;
-  return (top.stateNode as { current?: unknown } | null | undefined)?.current === top;
+// Which of a fiber and its alternate is committed: React's own
+// findCurrentFiberUsingSlowPath (react-reconciler). `return` pointers aren't
+// kept consistent between the two copies, so "the chain ends at the current
+// root" isn't enough: walk both copies up together, deciding at the first
+// shared parent by which copy is among its children.
+export function currentFiber(fiber: Fiber | null | undefined): Fiber | null {
+  if (!fiber) return null;
+  const alternate = fiber.alternate;
+  if (!alternate) return fiber;
+  let a: Fiber = fiber;
+  let b: Fiber = alternate;
+  for (let guard = 0; guard < 10000; guard++) {
+    const parentA = a.return;
+    if (!parentA) break;
+    const parentB = parentA.alternate;
+    if (!parentB) {
+      // Parent with a single copy: both children hang below it.
+      if (!parentA.return) break;
+      a = b = parentA.return;
+      continue;
+    }
+    if (parentA.child === parentB.child) {
+      // Both parents point to the same child list: the copy found there is current.
+      for (let child = parentA.child; child; child = child.sibling) {
+        if (child === a) return fiber;
+        if (child === b) return alternate;
+      }
+      return fiber;
+    }
+    if (a.return !== b.return) {
+      a = parentA;
+      b = parentB;
+    } else {
+      let found = false;
+      for (let child = parentA.child; child; child = child.sibling) {
+        if (child === a) { found = true; a = parentA; b = parentB; break; }
+        if (child === b) { found = true; b = parentA; a = parentB; break; }
+      }
+      if (!found) {
+        for (let child = parentB.child; child; child = child.sibling) {
+          if (child === a) { found = true; a = parentB; b = parentA; break; }
+          if (child === b) { found = true; b = parentB; a = parentA; break; }
+        }
+      }
+      if (!found) return fiber;
+    }
+  }
+  // `a` is a HostRoot: its FiberRoot says which copy is current.
+  return (a.stateNode as { current?: unknown } | null | undefined)?.current === a ? fiber : alternate;
+}
+
+/** The committed copy of a fiber's parent (walk up with this, not `.return`). */
+export function parentOf(fiber: Fiber): Fiber | null {
+  return currentFiber(fiber.return);
 }
 
 /**
@@ -51,8 +100,7 @@ function inCurrentTree(fiber: Fiber): boolean {
 export function fiberOf(domNode: Element): Fiber | null | undefined {
   const key = findFiberKey(domNode);
   const fiber = key ? (domNode as unknown as Record<string, Fiber>)[key] : null;
-  if (fiber?.alternate && !inCurrentTree(fiber) && inCurrentTree(fiber.alternate)) return fiber.alternate;
-  return fiber;
+  return currentFiber(fiber);
 }
 
 // Mantine React Table keeps the row data (email/firstname/lastname) in a
@@ -411,7 +459,7 @@ export type FcProps = Record<string, unknown>;
 
 export function findPlanningCalendar(fcRoot: Element, maxDepth = 8): { events: FcEventInput[]; api: FcApiLike | null; props: FcProps } | null {
   let fiber = fiberOf(fcRoot);
-  for (let depth = 0; fiber && depth <= maxDepth; depth++, fiber = fiber.return) {
+  for (let depth = 0; fiber && depth <= maxDepth; depth++, fiber = parentOf(fiber)) {
     const props = fiber.memoizedProps;
     if (!props || !Array.isArray(props.events) || !('eventClick' in props)) continue;
     let api: FcApiLike | null = null;

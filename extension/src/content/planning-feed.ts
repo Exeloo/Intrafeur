@@ -28,6 +28,7 @@ import {
   findPlanningCalendar,
   findQueryClient,
   findSidebarDraggable,
+  parentOf,
   type FcEventInput,
   type FcProps,
 } from './fiber-extract';
@@ -122,7 +123,7 @@ interface RoomPanel {
 function findRoomPanel(): RoomPanel | null {
   for (const input of Array.from(document.querySelectorAll('.scheduler-planning-sidebar input[type=checkbox]'))) {
     let fiber = fiberOf(input);
-    for (let depth = 0; fiber && depth <= 25; depth++, fiber = fiber.return) {
+    for (let depth = 0; fiber && depth <= 25; depth++, fiber = parentOf(fiber)) {
       const p = fiber.memoizedProps;
       if (p && typeof p.onRoomSelect === 'function' && typeof p.onAddModeChange === 'function' && Array.isArray(p.rooms)) {
         return p as unknown as RoomPanel;
@@ -224,8 +225,17 @@ function isoMs(v: unknown): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
-function handler(name: string): ((arg: unknown) => void) | null {
-  const fn = current?.props[name];
+// The site's handler as FullCalendar last received it (resetOptions on each
+// committed render): fiber props can be the stale copy, one render out of two,
+// and a stale closure holds the previous drafts (overwriting the last change).
+function handler(name: string, found = freshCalendar()): ((arg: unknown) => void) | null {
+  let fn: unknown = null;
+  try {
+    fn = found?.api?.getOption(name);
+  } catch {
+    fn = null;
+  }
+  if (typeof fn !== 'function') fn = found?.props[name];
   return typeof fn === 'function' ? (fn as (arg: unknown) => void) : null;
 }
 
@@ -273,9 +283,10 @@ function receive(start: unknown): void {
 // Room picked in the site's panel: the board's click = the site's own event
 // click (assigns / toggles that room, a draft).
 function roomClick(id: unknown): void {
-  const click = handler('eventClick');
-  if (!current || !planningModeOn() || !click || typeof id !== 'number' || !roomPickOf(findRoomPanel())) return;
-  if (!current.events.some((x) => eventIdOf(x) === id)) return;
+  const found = freshCalendar();
+  const click = handler('eventClick', found);
+  if (roomsBusy || !found || !planningModeOn() || !click || typeof id !== 'number' || !roomPickOf(findRoomPanel())) return;
+  if (!found.events.some((x) => eventIdOf(x) === id)) return;
   click({ event: { id: String(id) } });
 }
 
@@ -376,15 +387,15 @@ async function applyRooms(raw: unknown): Promise<void> {
       for (const id of wanted) {
         const found = freshCalendar();
         const input = found?.events.find((x) => eventIdOf(x) === id);
-        const click = found?.props.eventClick;
-        if (!found || !input || typeof click !== 'function' || !planningModeOn()) {
+        const click = handler('eventClick', found);
+        if (!found || !input || !click || !planningModeOn()) {
           result.failed++;
           continue;
         }
         const has = roomIdsOf((input.extendedProps ?? {}) as Record<string, unknown>).includes(roomId);
         if (has === (op === 'add')) continue;
         const before = roomIdsIn(found, id);
-        (click as (arg: unknown) => void)({ event: { id: String(id) } });
+        click({ event: { id: String(id) } });
         // One change at a time: each click reads the events of the last render.
         const changed = await waitFor(() => {
           const now = roomIdsIn(freshCalendar(), id);
