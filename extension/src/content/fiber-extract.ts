@@ -14,6 +14,8 @@ export interface Fiber {
   child?: Fiber | null;
   sibling?: Fiber | null;
   stateNode?: unknown;
+  /** The other copy of this fiber (React double-buffers: current / work-in-progress). */
+  alternate?: Fiber | null;
 }
 
 /** A function component's hook list entry (fiber.memoizedState chain). */
@@ -33,9 +35,24 @@ export function findFiberKey(domNode: Element): string | undefined {
   );
 }
 
+// Its chain of `return`s ends at the HostRoot that its FiberRoot calls current.
+function inCurrentTree(fiber: Fiber): boolean {
+  let top = fiber;
+  for (let i = 0; top.return && i < 5000; i++) top = top.return;
+  return (top.stateNode as { current?: unknown } | null | undefined)?.current === top;
+}
+
+/**
+ * The DOM node's fiber, in the committed tree. The expando React leaves on a
+ * DOM node can be the *alternate* (previous render) copy, whose props and
+ * ancestors' props are a render behind (verified live 2026-11: the planning's
+ * FullCalendar `events` read through it lagged after a room change / discard).
+ */
 export function fiberOf(domNode: Element): Fiber | null | undefined {
   const key = findFiberKey(domNode);
-  return key ? (domNode as unknown as Record<string, Fiber>)[key] : null;
+  const fiber = key ? (domNode as unknown as Record<string, Fiber>)[key] : null;
+  if (fiber?.alternate && !inCurrentTree(fiber) && inCurrentTree(fiber.alternate)) return fiber.alternate;
+  return fiber;
 }
 
 // Mantine React Table keeps the row data (email/firstname/lastname) in a
@@ -150,6 +167,9 @@ export interface ApiClientLike {
     ) => Promise<void>;
     // GET /events/:id; a graded activity has a gradingScaleId (what the
     // project page's "View grading scale" button keys on).
+    // GET /events with the planning's list-query params (verified live
+    // 2026-11: {campus, promotion: ['PGE:2031'], startDate, endDate} -> the events).
+    getAll?: (params: Record<string, unknown>) => Promise<unknown>;
     getById?: (eventId: number) => Promise<{
       activityInstance?: { gradingScaleId?: number | null; metadata?: { evaluationType?: string } | null } | null;
     }>;
@@ -189,6 +209,7 @@ export interface UnitStudent {
 export interface QueryClientLike {
   getQueryCache: () => {
     find: (filters: { queryKey: unknown[]; exact?: boolean }) => CachedQuery | undefined;
+    getAll?: () => CachedQuery[];
   };
 }
 
@@ -302,7 +323,7 @@ export function findSlotsList(root: Element, maxNodes = 20000): { slots: EventSl
   return null;
 }
 
-// --- Planning calendar blocks (Intrastek tagging) ---
+// --- Planning calendar blocks (old Intrastek mode tagging, native calendar) ---
 
 // The planning calendar is FullCalendar: each block is a
 // `div.scheduler-event[role=button]` whose fiber (verified live: depth 1)
@@ -358,6 +379,67 @@ export function extractSchedulerEvent(el: Element, maxDepth = 5): SchedulerEvent
       activityInstanceId: asString(ext.activityInstanceId),
       rooms: Array.isArray(ext.rooms) ? (ext.rooms as { name?: string | null }[]) : null,
     };
+  }
+  return null;
+}
+
+// --- Planning calendar (planning board feed) ---
+
+// The planning is FullCalendar React. The component 2 fibers above the
+// FullCalendar root div (`.scheduler-calendar`'s child holding the grid,
+// verified live 2026-11) has props `events` (exactly what's displayed, all
+// filters applied: `{id, title, start, end, color, className, extendedProps}`,
+// extendedProps = the intranet event record) and `ref` (the FullCalendar
+// instance: getApi() gives the view type/range and slotMin/MaxTime).
+export interface FcEventInput {
+  id?: unknown;
+  start?: unknown;
+  end?: unknown;
+  color?: unknown;
+  title?: unknown;
+  className?: unknown;
+  extendedProps?: Record<string, unknown> | null;
+}
+
+export interface FcApiLike {
+  view: { type: string; activeStart: Date; activeEnd: Date };
+  getOption(name: string): unknown;
+}
+
+/** FullCalendar props of the planning (handlers used by the board in planning mode). */
+export type FcProps = Record<string, unknown>;
+
+export function findPlanningCalendar(fcRoot: Element, maxDepth = 8): { events: FcEventInput[]; api: FcApiLike | null; props: FcProps } | null {
+  let fiber = fiberOf(fcRoot);
+  for (let depth = 0; fiber && depth <= maxDepth; depth++, fiber = fiber.return) {
+    const props = fiber.memoizedProps;
+    if (!props || !Array.isArray(props.events) || !('eventClick' in props)) continue;
+    let api: FcApiLike | null = null;
+    try {
+      api = (props.ref as { current?: { getApi?: () => FcApiLike } } | null)?.current?.getApi?.() ?? null;
+    } catch {
+      api = null;
+    }
+    return { events: props.events as FcEventInput[], api, props };
+  }
+  return null;
+}
+
+/**
+ * The FullCalendar `Draggable` of a plannable-activity card in the site's
+ * planning sidebar (`.scheduler-planning-sidebar .fc-event`), kept in the
+ * card component's state (verified live 2026-11: `new Draggable(el,
+ * {itemSelector: '.fc-event', eventData})`, eventData ignoring its argument).
+ */
+export function findSidebarDraggable(card: Element, maxDepth = 8): { eventData: (el: Element) => unknown } | null {
+  let fiber = fiberOf(card);
+  for (let depth = 0; fiber && depth <= maxDepth; depth++, fiber = fiber.return) {
+    let hook = fiber.memoizedState as { memoizedState?: unknown; next?: unknown } | null;
+    for (let i = 0; hook && typeof hook === 'object' && i < 50; i++) {
+      const settings = (hook.memoizedState as { settings?: { eventData?: unknown } } | null)?.settings;
+      if (settings && typeof settings.eventData === 'function') return { eventData: settings.eventData as (el: Element) => unknown };
+      hook = hook.next as typeof hook;
+    }
   }
   return null;
 }

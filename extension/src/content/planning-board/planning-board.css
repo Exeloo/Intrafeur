@@ -1,0 +1,834 @@
+/* Planning board (isolated world). The native FullCalendar grid is hidden
+   only while the board is mounted (<html data-epitools-pb-active="on">); it
+   stays rendered as the data source. Colours follow the site's Mantine theme
+   variables; each card gets the site's block colour as --pb-color. */
+
+html[data-epitools-pb-active='on'] [data-epitools-pb-native] {
+  display: none !important;
+}
+
+.epitools-pb {
+  --pb-border: var(--mantine-color-default-border, #424242);
+  --pb-text: var(--mantine-color-text, #c9c9c9);
+  --pb-dim: var(--mantine-color-dimmed, #828282);
+  --pb-accent: var(--mantine-primary-color-filled, #809dfd);
+  --pb-surface: var(--mantine-color-default, #2e2e2e);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 16px;
+  margin-top: 8px;
+  color: var(--pb-text);
+  font: 13px/1.35 var(--mantine-font-family, sans-serif);
+}
+
+@media (max-width: 1100px) {
+  .epitools-pb { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Intrastek mode: the site's calendar column becomes [our panel] [calendar,
+   toolbar included], like the site's planning sidebar column. */
+.epitools-pb-host--left {
+  display: grid;
+  /* Exactly the site's planning sidebar column (Grid col span 3 = calc(25% -
+     12px), 16px gutter, verified live): switching modes doesn't resize the
+     calendar. */
+  grid-template-columns: calc(25% - 12px) minmax(0, 1fr);
+  align-items: start;
+  gap: 16px;
+}
+
+/* Re-inserted on each mode switch: a short fade instead of a pop. */
+.epitools-pb-left:not([hidden]) {
+  animation: epitools-pb-fade 160ms ease-out;
+}
+
+@keyframes epitools-pb-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .epitools-pb-left:not([hidden]) { animation: none; }
+}
+
+/* Grid */
+.epitools-pb-grid {
+  position: relative;
+  min-width: 0;
+  border: 1px solid var(--pb-border);
+  border-radius: 6px;
+  /* clip, not hidden: hidden makes a scroll container and breaks the sticky day header. */
+  overflow: clip;
+}
+
+.epitools-pb-head,
+.epitools-pb-body {
+  display: grid;
+  grid-template-columns: 52px var(--pb-cols, repeat(7, minmax(0, 1fr)));
+}
+
+.epitools-pb-head {
+  position: sticky;
+  /* Below the site's fixed Mantine AppShell header (60px, verified). */
+  top: var(--app-shell-header-offset, 0px);
+  z-index: 3;
+  border-bottom: 1px solid var(--pb-border);
+  background: var(--mantine-color-body, #242424);
+}
+
+.epitools-pb-day {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 6px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 8px 8px 6px;
+  border-left: 1px solid var(--pb-border);
+  color: var(--pb-dim);
+  font-size: 12px;
+}
+
+.epitools-pb-day-name {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.epitools-pb-day-num {
+  color: var(--pb-text);
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.epitools-pb-day--today .epitools-pb-day-num {
+  color: var(--pb-accent);
+}
+
+.epitools-pb-day-count {
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--pb-surface);
+  font-size: 11px;
+}
+
+.epitools-pb-body {
+  position: relative;
+}
+
+.epitools-pb-gutter {
+  position: relative;
+}
+
+.epitools-pb-hour {
+  position: absolute;
+  right: 6px;
+  transform: translateY(-50%);
+  color: var(--pb-dim);
+  font: 11px var(--mantine-font-family-monospace, monospace);
+}
+
+.epitools-pb-hour:first-child {
+  transform: none;
+}
+
+.epitools-pb-col {
+  position: relative;
+  border-left: 1px solid var(--pb-border);
+  background-image: repeating-linear-gradient(
+    to bottom,
+    var(--pb-border) 0,
+    var(--pb-border) 1px,
+    transparent 1px,
+    transparent var(--pb-hour, 66px)
+  );
+  opacity: 0.999; /* own stacking context for the cards */
+}
+
+.epitools-pb-col--today {
+  background-color: color-mix(in srgb, var(--pb-accent) 5%, transparent);
+}
+
+.epitools-pb-now {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  height: 2px;
+  background: #fa5252;
+  pointer-events: none;
+}
+
+.epitools-pb-now[hidden] {
+  display: none;
+}
+
+.epitools-pb-now::before {
+  content: '';
+  position: absolute;
+  left: -4px;
+  top: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fa5252;
+}
+
+.epitools-pb-empty {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: var(--pb-dim);
+}
+
+/* Cards */
+.epitools-pb-card {
+  --pb-color: #5c7cfa;
+  position: absolute;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 3px 6px 3px 8px;
+  overflow: hidden;
+  border-left: 3px solid var(--pb-color);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--pb-color) 28%, var(--mantine-color-body, #242424));
+  color: var(--pb-text);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+  transition: box-shadow 0.12s, opacity 0.12s;
+}
+
+.epitools-pb-card:hover {
+  z-index: 1;
+  background: color-mix(in srgb, var(--pb-color) 40%, var(--mantine-color-body, #242424));
+}
+
+.epitools-pb-card:focus-visible {
+  z-index: 1;
+  outline: 2px solid var(--pb-text);
+  outline-offset: 1px;
+}
+
+.epitools-pb-card--selected {
+  z-index: 1;
+  box-shadow: 0 0 0 2px var(--pb-accent), 0 4px 14px rgba(0, 0, 0, 0.45);
+}
+
+.epitools-pb-card--dimmed {
+  opacity: 0.25;
+}
+
+.epitools-pb-card--exam {
+  background-image: repeating-linear-gradient(135deg, transparent 0 8px, rgba(255, 255, 255, 0.05) 8px 16px);
+}
+
+.epitools-pb-card-top {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.epitools-pb-card-time {
+  color: var(--pb-dim);
+  font: 10px var(--mantine-font-family-monospace, monospace);
+  white-space: nowrap;
+}
+
+.epitools-pb-card-title {
+  font-weight: 600;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+.epitools-pb-card-meta,
+.epitools-pb-card-foot {
+  overflow: hidden;
+  color: var(--pb-dim);
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.epitools-pb-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.epitools-pb-card svg,
+.epitools-pb-ik svg {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+}
+
+.epitools-pb-card--short .epitools-pb-card-meta,
+.epitools-pb-card--short .epitools-pb-card-foot {
+  display: none;
+}
+
+.epitools-pb-card--short .epitools-pb-card-title {
+  -webkit-line-clamp: 1;
+}
+
+/* Intrastek state badge on a card */
+.epitools-pb-ik {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  padding: 0 5px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 15px;
+  white-space: nowrap;
+}
+
+.epitools-pb-ik--initialized { background: #2fb344; color: #fff; }
+.epitools-pb-ik--proposed { background: #f59f00; color: #1a1a1a; }
+.epitools-pb-ik--linked { border: 1px dashed #2fb344; color: #8ce99a; }
+
+/* Side panels */
+.epitools-pb-panel {
+  position: sticky;
+  top: calc(var(--app-shell-header-offset, 0px) + 12px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-sizing: border-box;
+  max-height: calc(100vh - var(--app-shell-header-offset, 0px) - 24px);
+  overflow-y: auto;
+  padding: 12px;
+  border: 1px solid var(--pb-border);
+  border-radius: 6px;
+}
+
+.epitools-pb-panel[hidden] {
+  display: none;
+}
+
+/* The left panel can live outside .epitools-pb (planning sidebar): own tokens. */
+.epitools-pb-left {
+  --pb-border: var(--mantine-color-default-border, #424242);
+  --pb-text: var(--mantine-color-text, #c9c9c9);
+  --pb-dim: var(--mantine-color-dimmed, #828282);
+  --pb-accent: var(--mantine-primary-color-filled, #809dfd);
+  --pb-surface: var(--mantine-color-default, #2e2e2e);
+  color: var(--pb-text);
+  font: 13px/1.35 var(--mantine-font-family, sans-serif);
+}
+
+/* Planning mode: the left panel sits on top of the site's sidebar column. */
+.epitools-pb-panel--sidebar {
+  position: static;
+  max-height: none;
+  margin-bottom: 12px;
+}
+
+.epitools-pb-panel-body,
+.epitools-pb-section,
+.epitools-pb-section-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.epitools-pb-panel-body {
+  gap: 12px;
+}
+
+.epitools-pb-section[hidden] {
+  display: none;
+}
+
+.epitools-pb-section:not([hidden]) + .epitools-pb-section {
+  padding-top: 12px;
+  border-top: 1px solid var(--pb-border);
+}
+
+/* Header search bar, left of the site's filters button (Mantine input look). */
+.epitools-pb-searchbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  width: 280px;
+  height: calc(2.25rem * var(--mantine-scale, 1));
+  padding: 0 10px;
+  border: 1px solid var(--mantine-color-default-border, #424242);
+  background: var(--mantine-color-default, #2e2e2e);
+  color: var(--mantine-color-dimmed, #828282);
+  font: 13px/1 var(--mantine-font-family, sans-serif);
+}
+
+.epitools-pb-searchbar:focus-within {
+  border-color: var(--mantine-primary-color-filled, #809dfd);
+}
+
+.epitools-pb-searchbar > svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+
+.epitools-pb-searchbar .epitools-pb-search {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--mantine-color-text, #c9c9c9);
+  font: inherit;
+}
+
+.epitools-pb-searchcount {
+  flex: none;
+  font: 600 11px/1 var(--mantine-font-family-monospace, monospace);
+}
+
+.epitools-pb-search,
+.epitools-pb-select {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--pb-border);
+  border-radius: 4px;
+  background: var(--pb-surface);
+  color: var(--pb-text);
+  font: inherit;
+}
+
+.epitools-pb-select:focus-visible,
+.epitools-pb-btn:focus-visible,
+.epitools-pb-chip:focus-visible {
+  outline: 2px solid var(--pb-accent);
+  outline-offset: 1px;
+}
+
+.epitools-pb-summary,
+.epitools-pb-muted {
+  margin: 0;
+  color: var(--pb-dim);
+  font-size: 12px;
+}
+
+.epitools-pb-h {
+  margin: 0;
+  color: var(--pb-dim);
+  font: 600 11px/1.4 var(--mantine-font-family-monospace, monospace);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.epitools-pb-chips {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.epitools-pb-chip {
+  padding: 6px 8px;
+  border: 1px solid var(--pb-border);
+  border-left-width: 3px;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--pb-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.epitools-pb-chip strong { font-size: 15px; }
+.epitools-pb-chip:hover:not(:disabled) { background: var(--pb-surface); }
+.epitools-pb-chip:disabled { opacity: 0.45; cursor: default; }
+.epitools-pb-chip--initialized { border-left-color: #2fb344; }
+.epitools-pb-chip--proposed { border-left-color: #f59f00; }
+.epitools-pb-chip--none { border-left-color: #868e96; }
+.epitools-pb-chip--linked { border-left-color: #8ce99a; border-left-style: dashed; }
+
+.epitools-pb-total {
+  margin: 0;
+  font-weight: 600;
+}
+
+.epitools-pb-error {
+  margin: 0;
+  color: #ff6b6b;
+}
+
+.epitools-pb-hints {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--pb-dim);
+}
+
+.epitools-pb-detail-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding-left: 10px;
+  border-left: 3px solid var(--pb-color, var(--pb-accent));
+}
+
+.epitools-pb-detail-title {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.epitools-pb-detail-head .epitools-pb-btn {
+  margin-left: auto;
+}
+
+.epitools-pb-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  margin: 0;
+}
+
+.epitools-pb-facts dt { color: var(--pb-dim); }
+.epitools-pb-facts dd { margin: 0; overflow-wrap: anywhere; }
+
+.epitools-pb-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.epitools-pb-btn {
+  padding: 5px 12px;
+  border: 1px solid var(--pb-border);
+  border-radius: 4px;
+  background: var(--pb-surface);
+  color: var(--pb-text);
+  font: 500 13px/1.3 var(--mantine-font-family, sans-serif);
+  cursor: pointer;
+}
+
+.epitools-pb-btn:hover { background: var(--mantine-color-default-hover, #3b3b3b); }
+
+.epitools-pb-btn--primary {
+  border-color: var(--pb-accent);
+  background: var(--pb-accent);
+  color: #0b0f19;
+}
+
+.epitools-pb-btn--primary:hover { background: var(--mantine-primary-color-filled-hover, #6d8cf9); }
+
+.epitools-pb-picked {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.epitools-pb-picked li {
+  display: flex;
+  flex-direction: column;
+}
+
+.epitools-pb-picked-title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.epitools-pb-legends {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 12px;
+}
+
+.epitools-pb-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--mantine-color-dimmed, #828282);
+}
+
+.epitools-pb-swatch {
+  width: 14px;
+  height: 10px;
+  box-sizing: border-box;
+  border-radius: 2px;
+}
+
+.epitools-pb-swatch--initialized { border: 2px solid #2fb344; }
+.epitools-pb-swatch--proposed { border: 2px dashed #f59f00; }
+.epitools-pb-swatch--none { background: #868e96; opacity: 0.4; }
+.epitools-pb-swatch--linked { border: 2px dotted #2fb344; }
+
+/* Cards in Intrastek mode (inset outline: never clipped by the column). */
+.epitools-pb-card--ik-initialized { outline: 2px solid #2fb344; outline-offset: -2px; }
+.epitools-pb-card--ik-proposed { outline: 2px dashed #f59f00; outline-offset: -2px; }
+.epitools-pb-card--ik-linked { outline: 2px dotted #2fb344; outline-offset: -2px; }
+.epitools-pb-card--ik-none:not(.epitools-pb-card--selected) { opacity: 0.45; }
+.epitools-pb-card--ik-none.epitools-pb-card--dimmed { opacity: 0.2; }
+
+/* The site's room assignment, mirrored (its event-not-in-selected-room /
+   event-without-room classes). */
+.epitools-pb-card--room-out { opacity: 0.3; }
+.epitools-pb-card--no-room { box-shadow: inset 0 0 0 2px #fa5252; }
+
+/* Rooms of the selection, as tags */
+.epitools-pb-rooms {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.epitools-pb-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.epitools-pb-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 2px 1px 8px;
+  border: 1px solid var(--pb-border);
+  border-radius: 999px;
+  background: var(--pb-surface);
+  font-size: 12px;
+}
+
+.epitools-pb-tag-count { color: var(--pb-dim); }
+.epitools-pb-tag--add { border-style: dashed; border-color: #2fb344; }
+.epitools-pb-tag--remove { border-style: dashed; border-color: #fa5252; }
+.epitools-pb-tag--remove > span:first-child { text-decoration: line-through; opacity: 0.6; }
+
+.epitools-pb-tag-x {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--pb-dim);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.epitools-pb-tag-x:hover:not(:disabled) { background: var(--pb-border); color: var(--pb-text); }
+.epitools-pb-tag-x:disabled { cursor: default; opacity: 0.5; }
+.epitools-pb-tag-x:focus-visible,
+.epitools-pb-input:focus-visible { outline: 2px solid var(--pb-accent); outline-offset: 1px; }
+
+.epitools-pb-input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--pb-border);
+  border-radius: 4px;
+  background: var(--pb-surface);
+  color: var(--pb-text);
+  font: inherit;
+}
+
+.epitools-pb-note {
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  border-left: 3px solid var(--pb-accent);
+  border-radius: 4px;
+  background: var(--pb-surface);
+  font-size: 12px;
+}
+
+/* Planning-mode drags */
+.epitools-pb-grid--editable .epitools-pb-card {
+  cursor: grab;
+}
+
+.epitools-pb-grid--editable .epitools-pb-col {
+  cursor: crosshair;
+}
+
+html.epitools-pb-dragging,
+html.epitools-pb-dragging * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+
+.epitools-pb-ghost {
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  z-index: 6;
+  box-sizing: border-box;
+  overflow: hidden;
+  padding: 2px 4px;
+  border: 2px dashed var(--pb-color, var(--pb-accent));
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--pb-color, var(--pb-accent)) 30%, transparent);
+  color: var(--pb-text);
+  font: 600 11px/1.3 var(--mantine-font-family-monospace, monospace);
+  pointer-events: none;
+}
+
+.epitools-pb-ghost--create {
+  border-style: solid;
+}
+
+/* Planning-mode drafts (not published yet) */
+.epitools-pb-card--draft {
+  outline: 2px dashed var(--pb-accent);
+  outline-offset: -2px;
+}
+
+.epitools-pb-draft {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--pb-accent);
+  color: var(--mantine-color-body, #1a1a1a);
+  font: 700 9px/14px var(--mantine-font-family-monospace, monospace);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* Narrow screens: one column (after the column rules above, so it wins). */
+@media (max-width: 1100px) {
+  .epitools-pb,
+  .epitools-pb-host--left { grid-template-columns: minmax(0, 1fr); }
+  .epitools-pb-panel { position: static; max-height: none; }
+}
+
+/* --- Motion: hover / press transitions and small entrance animations ---
+   Cards are rebuilt on every selection / filter change, so they only get
+   hover transitions (an entrance animation would replay on each click). */
+.epitools-pb,
+.epitools-pb-left,
+.epitools-pb-searchbar {
+  --pb-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.epitools-pb-card {
+  transition:
+    background-color 150ms var(--pb-ease),
+    box-shadow 160ms var(--pb-ease),
+    opacity 180ms var(--pb-ease),
+    transform 160ms var(--pb-ease),
+    filter 150ms var(--pb-ease);
+}
+
+.epitools-pb-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  filter: brightness(1.06);
+}
+
+.epitools-pb-card--selected:hover {
+  box-shadow: 0 0 0 2px var(--pb-accent), 0 6px 16px rgba(0, 0, 0, 0.5);
+}
+
+.epitools-pb-card:active {
+  transform: translateY(0) scale(0.99);
+}
+
+/* Dragging: no hover effects under the pointer, the ghost is the feedback. */
+html.epitools-pb-dragging .epitools-pb-card {
+  transition: none;
+  transform: none;
+  filter: none;
+}
+
+.epitools-pb-btn,
+.epitools-pb-chip,
+.epitools-pb-tag,
+.epitools-pb-tag-x,
+.epitools-pb-input,
+.epitools-pb-select,
+.epitools-pb-searchbar,
+.epitools-pb-picked li {
+  transition:
+    background-color 120ms var(--pb-ease),
+    border-color 120ms var(--pb-ease),
+    color 120ms var(--pb-ease),
+    box-shadow 120ms var(--pb-ease),
+    transform 120ms var(--pb-ease),
+    opacity 120ms var(--pb-ease);
+}
+
+.epitools-pb-btn:hover:not(:disabled),
+.epitools-pb-chip:hover:not(:disabled) {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.epitools-pb-btn:active:not(:disabled),
+.epitools-pb-chip:active:not(:disabled),
+.epitools-pb-tag-x:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.epitools-pb-tag:hover { border-color: var(--pb-dim); }
+.epitools-pb-input:hover:not(:disabled),
+.epitools-pb-select:hover:not(:disabled),
+.epitools-pb-searchbar:hover { border-color: var(--pb-dim); }
+.epitools-pb-input:focus,
+.epitools-pb-select:focus { border-color: var(--pb-accent); }
+.epitools-pb-picked li:hover { background: var(--pb-surface); }
+
+/* Staged room tags pop in; the room-pick note and the drag ghost fade in. */
+.epitools-pb-tag--add,
+.epitools-pb-tag--remove {
+  animation: epitools-pb-pop 180ms var(--pb-ease);
+}
+
+.epitools-pb-note {
+  animation: epitools-pb-slide 180ms var(--pb-ease);
+}
+
+.epitools-pb-ghost {
+  animation: epitools-pb-fade 120ms ease-out;
+}
+
+/* Now-line dot: a slow pulse. */
+.epitools-pb-now::before {
+  animation: epitools-pb-pulse 2.4s ease-out infinite;
+}
+
+@keyframes epitools-pb-pop {
+  from { opacity: 0; transform: scale(0.85); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes epitools-pb-slide {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes epitools-pb-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(250, 82, 82, 0.6); }
+  70% { box-shadow: 0 0 0 6px rgba(250, 82, 82, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(250, 82, 82, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .epitools-pb *,
+  .epitools-pb-left *,
+  .epitools-pb-searchbar,
+  .epitools-pb-left {
+    animation: none !important;
+    transition: none !important;
+  }
+  .epitools-pb-card:hover,
+  .epitools-pb-card:active { transform: none; }
+}

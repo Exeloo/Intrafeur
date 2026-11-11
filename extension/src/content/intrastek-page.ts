@@ -9,7 +9,8 @@
 // so the isolated half treats it as untrusted.
 import { extractSchedulerEvent } from './fiber-extract';
 import { dialogEvent, dialogs } from './shared/mantine';
-import { watchDom } from './shared/dom-watch';
+import { datasetAttr, watchDom } from './shared/dom-watch';
+import { FLAGS, mirroredFlagOn } from '../settings';
 
 const ENABLED_ATTR = 'data-epitools-intrastek';
 
@@ -72,9 +73,12 @@ function check(): void {
   }
   tagged = true;
 
-  // Calendar blocks. Re-read every time (cheap, ~50-200 blocks): FullCalendar
-  // may reuse a block element for another event after navigation.
-  for (const block of Array.from(document.querySelectorAll('.scheduler-event'))) {
+  // Calendar blocks, for the old Intrastek mode (native calendar only: with the
+  // new planning calendar on, the board has its own data). Re-read every time
+  // (cheap, ~50-200 blocks): FullCalendar may reuse a block element for
+  // another event after navigation.
+  const blocks = mirroredFlagOn(FLAGS.planningBoard) ? [] : Array.from(document.querySelectorAll('.scheduler-event'));
+  for (const block of blocks) {
     const event = extractSchedulerEvent(block);
     applyTag(
       block,
@@ -88,7 +92,7 @@ function check(): void {
     );
   }
 
-  // Event-details modal, found the way event-info.ts finds it (unit link in
+  // Event-details modal, found via shared/mantine.ts dialogEvent (unit link in
   // a Mantine dialog, event record in its React props).
   for (const dialog of dialogs()) {
     const event = dialogEvent(dialog);
@@ -106,5 +110,5 @@ function check(): void {
 }
 
 export function init(): void {
-  watchDom(check, { htmlAttributes: [ENABLED_ATTR] });
+  watchDom(check, { htmlAttributes: [ENABLED_ATTR, datasetAttr(FLAGS.planningBoard.mirror)] });
 }

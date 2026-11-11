@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extName__",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "__MSG_extDescription__",
   "default_locale": "en",
   "icons": {
@@ -30,13 +30,13 @@
     {
       "matches": ["https://my.epitech.eu/*"],
       "js": ["content/isolated.js"],
-      "css": ["content/shared.css", "content/attendance.css", "content/unit-filters.css", "content/intrastek.css", "content/hide-grades.css"],
+      "css": ["content/shared.css", "content/attendance.css", "content/unit-filters.css", "content/intrastek.css", "content/hide-grades.css", "content/planning-board/planning-board.css"],
       "run_at": "document_idle"
     },
     {
       "matches": ["https://my.epitech.eu/*"],
       "js": ["content/main-world.js"],
-      "css": ["content/event-info.css", "content/eval-sheet.css", "content/absence-status.css", "content/student-units.css"],
+      "css": ["content/eval-sheet.css", "content/absence-status.css", "content/student-units.css", "content/promotion-tags.css"],
       "run_at": "document_idle",
       "world": "MAIN"
     }

@@ -21,11 +21,6 @@ export const FACTIONS_ENABLED_DEFAULT = true;
 export const EVAL_SHEET_ENABLED_KEY = 'evalSheetEnabled';
 export const EVAL_SHEET_ENABLED_DEFAULT = false;
 
-// Event "Copy info" button toggle — same storage.local reasoning. On by
-// default (the feature needs no extra permission).
-export const EVENT_INFO_ENABLED_KEY = 'eventInfoEnabled';
-export const EVENT_INFO_ENABLED_DEFAULT = true;
-
 // Units page filter presets toggle — same storage.local reasoning. On by
 // default (purely local feature, no permission needed).
 export const UNIT_FILTERS_ENABLED_KEY = 'unitFiltersEnabled';
@@ -203,7 +198,6 @@ export const INTRASTEK_API_KEY_KEY = 'intrastekApiKey';
 // Group targeted by the planning actions; '' / missing = the user's own group.
 export const INTRASTEK_DEFAULT_GROUP_KEY = 'intrastekDefaultGroupId';
 // "Intrastek mode" on the planning (block colours + right-click menu).
-export const INTRASTEK_MODE_KEY = 'intrastekModeEnabled';
 
 // Contract with the Intrastek API's /extension/* routes (X-Api-Key auth).
 export type IntrastekScope = 'INTRANET_READ' | 'INTRANET_WRITE';

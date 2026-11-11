@@ -7,6 +7,7 @@ import { init as unitFilters } from './unit-filters';
 import { init as evalSheet } from './eval-sheet';
 import { init as intrastek } from './intrastek';
 import { init as hideGrades } from './hide-grades';
+import { init as planningBoard } from './planning-board/board';
 
 const FEATURES: [string, () => unknown][] = [
   ['mirror', mirror],
@@ -15,6 +16,7 @@ const FEATURES: [string, () => unknown][] = [
   ['eval-sheet', evalSheet],
   ['intrastek', intrastek],
   ['hide-grades', hideGrades],
+  ['planning-board', planningBoard],
 ];
 
 // Language first (also mirrored onto <html data-epitools-lang> for the MAIN world),

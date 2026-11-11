@@ -5,7 +5,7 @@
 // photo data URLs from React state / the site's React Query cache and posts them
 // to the isolated-world half (eval-sheet.ts), which builds the PDF.
 //
-// Runs in the page's MAIN world (see event-info.ts for why): no browser.*
+// Runs in the page's MAIN world (React fibers aren't visible from the isolated world): no browser.*
 // APIs and no webextension-polyfill here. The per-browser on/off toggle is
 // mirrored onto <html data-epitools-eval-sheet="on"> (FLAGS.evalSheet).
 import {

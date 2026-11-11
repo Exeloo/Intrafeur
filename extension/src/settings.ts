@@ -8,11 +8,8 @@ import {
   ABSENCE_STATUS_ENABLED_KEY,
   EVAL_SHEET_ENABLED_DEFAULT,
   EVAL_SHEET_ENABLED_KEY,
-  EVENT_INFO_ENABLED_DEFAULT,
-  EVENT_INFO_ENABLED_KEY,
   FACTIONS_ENABLED_DEFAULT,
   FACTIONS_ENABLED_KEY,
-  INTRASTEK_MODE_KEY,
   UNIT_FILTERS_ENABLED_DEFAULT,
   UNIT_FILTERS_ENABLED_KEY,
 } from './types';
@@ -28,7 +25,6 @@ export interface FlagDef {
 export const FLAGS = {
   factions: { key: FACTIONS_ENABLED_KEY, default: FACTIONS_ENABLED_DEFAULT },
   unitFilters: { key: UNIT_FILTERS_ENABLED_KEY, default: UNIT_FILTERS_ENABLED_DEFAULT },
-  eventInfo: { key: EVENT_INFO_ENABLED_KEY, default: EVENT_INFO_ENABLED_DEFAULT, mirror: 'epitoolsEventInfo' },
   evalSheet: { key: EVAL_SHEET_ENABLED_KEY, default: EVAL_SHEET_ENABLED_DEFAULT, mirror: 'epitoolsEvalSheet' },
   absenceStatus: {
     key: ABSENCE_STATUS_ENABLED_KEY,
@@ -38,7 +34,9 @@ export const FLAGS = {
   studentUnits: { key: 'studentUnitsEnabled', default: true, mirror: 'epitoolsStudentUnits' },
   attendancePresent: { key: 'attendancePresentEnabled', default: true, mirror: 'epitoolsAttendancePresent' },
   hideGrades: { key: 'hideGradesEnabled', default: true },
-  intrastekMode: { key: INTRASTEK_MODE_KEY, default: false },
+  promotionTags: { key: 'promotionTagsEnabled', default: false, mirror: 'epitoolsPromotionTags' },
+  // The new planning calendar (planning board): opt-in.
+  planningBoard: { key: 'planningBoardEnabled', default: false, mirror: 'epitoolsPlanningBoard' },
 } satisfies Record<string, FlagDef>;
 
 export type FlagId = keyof typeof FLAGS;

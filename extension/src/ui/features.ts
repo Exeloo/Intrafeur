@@ -22,24 +22,25 @@ interface FeatureMeta {
 export const FEATURES = {
   factions: { title: 'fFactions', desc: 'fFactionsDesc', configure: 'factions' },
   unitFilters: { title: 'fUnitFilters', desc: 'fUnitFiltersDesc' },
-  eventInfo: { title: 'fEventInfo', desc: 'fEventInfoDesc' },
   evalSheet: { title: 'fEvalSheet', desc: 'fEvalSheetDesc' },
   absenceStatus: { title: 'fAbsenceStatus', desc: 'fAbsenceStatusDesc' },
   attendancePresent: { title: 'fAttendancePresent', desc: 'fAttendancePresentDesc' },
   studentUnits: { title: 'fStudentUnits', desc: 'fStudentUnitsDesc' },
   hideGrades: { title: 'fHideGrades', desc: 'fHideGradesDesc' },
-  intrastekMode: { title: 'fIntrastekMode', desc: 'fIntrastekModeDesc', configure: 'intrastek' },
+  promotionTags: { title: 'fPromotionTags', desc: 'fPromotionTagsDesc' },
+  planningBoard: { title: 'fPlanningBoard', desc: 'fPlanningBoardDesc' },
 } satisfies Record<FlagId, FeatureMeta>;
 
 const ORDER: FlagId[] = [
+  'planningBoard',
   'factions',
   'unitFilters',
-  'eventInfo',
   'evalSheet',
   'absenceStatus',
   'attendancePresent',
   'studentUnits',
   'hideGrades',
+  'promotionTags',
 ];
 
 interface State {
@@ -146,17 +147,6 @@ function rowsFor(state: State, opts: ListOptions): Row[] {
     note: hasKey ? { text: t('ikOnKey'), kind: 'ok' } : { text: t('ikOffNoKey'), kind: 'off' },
     configure: 'intrastek',
   });
-  if (hasKey) {
-    const meta: FeatureMeta = FEATURES.intrastekMode;
-    const flag = FLAGS.intrastekMode;
-    rows.push({
-      id: 'intrastekMode',
-      title: t(meta.title),
-      desc: t(meta.desc),
-      control: flagSelect(flag, raw[flag.key]),
-      modified: typeof raw[flag.key] === 'boolean',
-    });
-  }
   return rows;
 }
 

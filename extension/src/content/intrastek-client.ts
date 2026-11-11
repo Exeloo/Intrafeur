@@ -22,7 +22,6 @@ export const EVENT_ID_ATTR = 'data-epitools-event-id';
 export const EVENT_TITLE_ATTR = 'data-epitools-event-title';
 export const EVENT_START_ATTR = 'data-epitools-event-start';
 export const EVENT_END_ATTR = 'data-epitools-event-end';
-export const EVENT_ACTIVITY_ATTR = 'data-epitools-event-activity';
 
 export class IntrastekError extends Error {
   constructor(
@@ -157,6 +156,48 @@ export function clearCache(): void {
   failedAt.clear();
 }
 
+// --- Who the key belongs to (shared by the modal button and the board) ---
+
+let me: IntrastekMe | null = null;
+let meError = '';
+let mePromise: Promise<IntrastekMe | null> | null = null;
+
+export function currentMe(): IntrastekMe | null {
+  return me;
+}
+
+export function meErrorText(): string {
+  return meError;
+}
+
+/** Cached; a failure is retried on the next call. */
+export function loadMe(): Promise<IntrastekMe | null> {
+  if (!mePromise) {
+    mePromise = api.me().then(
+      (result) => {
+        me = result;
+        meError = '';
+        notify();
+        return result;
+      },
+      (err: unknown) => {
+        me = null;
+        meError = (err as Error)?.message || String(err);
+        mePromise = null;
+        notify();
+        return null;
+      },
+    );
+  }
+  return mePromise;
+}
+
+export function resetMe(): void {
+  me = null;
+  meError = '';
+  mePromise = null;
+}
+
 export async function runWrite(write: () => Promise<IntrastekWriteResult>): Promise<IntrastekWriteResult> {
   const res = await write();
   invalidateAll();
@@ -165,6 +206,34 @@ export async function runWrite(write: () => Promise<IntrastekWriteResult>): Prom
   }
   notify();
   return res;
+}
+
+// Bulk: writes in sequence, one invalidation + notify at the end (runWrite
+// per item would drop in-flight fetches and refetch every block N times).
+export async function runWrites(
+  ids: number[],
+  write: (id: number) => Promise<IntrastekWriteResult>,
+  onProgress?: (handled: number) => void,
+): Promise<{ done: number; failed: { id: number; message: string }[] }> {
+  const states: IntrastekEventState[] = [];
+  const failed: { id: number; message: string }[] = [];
+  for (const id of ids) {
+    try {
+      const res = await write(id);
+      if (res?.state && Number.isSafeInteger(res.state.eventId)) states.push(res.state);
+    } catch (err) {
+      failed.push({ id, message: (err as Error)?.message || String(err) });
+    }
+    onProgress?.(states.length + failed.length);
+  }
+  const done = ids.length - failed.length;
+  if (done) {
+    invalidateAll();
+    const at = Date.now();
+    for (const state of states) cache.set(state.eventId, { state, at });
+    notify();
+  }
+  return { done, failed };
 }
 
 export function resultMessage(res: IntrastekWriteResult): string {
@@ -216,8 +285,8 @@ export function groupView(state: IntrastekEventState, groupId: string | null): G
 }
 
 // Same rule as the API (back-to-back = next start at most 15 min after the
-// end so far, same Paris day, same intranet activity), over the tagged
-// blocks on screen. The tags are forgeable: display only.
+// end so far, same Paris day, same intranet activity), over the planning
+// board's events (setPlanningIndex). Display only: the API decides.
 const MERGE_GAP_MS = 15 * 60_000;
 const parisDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' });
 
@@ -226,28 +295,22 @@ function guessedHead(eventId: number, groupId: string | null): number | null {
   return head !== null && onIntrastek(head, groupId) ? head : null;
 }
 
-type TaggedBlock = { activity: string; start: number; end: number };
-let blockIndex: Map<number, TaggedBlock> | null = null;
+type IndexedEvent = { activity: string; start: number; end: number };
+let planningIndex = new Map<number, IndexedEvent>();
 
-// Built once per synchronous pass (a decorate pass calls guessHead for every
-// block; rescanning the document each time was O(n²)), dropped right after.
-function taggedBlocks(): Map<number, TaggedBlock> {
-  if (blockIndex) return blockIndex;
-  const byId = new Map<number, TaggedBlock>();
-  for (const el of Array.from(document.querySelectorAll(`[${EVENT_ID_ATTR}][${EVENT_ACTIVITY_ATTR}]`))) {
-    const id = parseEventId(el.getAttribute(EVENT_ID_ATTR));
-    const activity = el.getAttribute(EVENT_ACTIVITY_ATTR);
-    const start = Date.parse(el.getAttribute(EVENT_START_ATTR) ?? '');
-    const end = Date.parse(el.getAttribute(EVENT_END_ATTR) ?? '');
-    if (id && activity && Number.isFinite(start) && Number.isFinite(end)) byId.set(id, { activity, start, end });
+/** The events on screen (planning board feed), for the follower guess. */
+export function setPlanningIndex(events: { id: number; activity: string | null; start: string; end: string }[]): void {
+  const byId = new Map<number, IndexedEvent>();
+  for (const e of events) {
+    const start = Date.parse(e.start);
+    const end = Date.parse(e.end);
+    if (e.activity && Number.isFinite(start) && Number.isFinite(end)) byId.set(e.id, { activity: e.activity, start, end });
   }
-  blockIndex = byId;
-  setTimeout(() => (blockIndex = null), 0);
-  return byId;
+  planningIndex = byId;
 }
 
 function guessHead(eventId: number): number | null {
-  const byId = taggedBlocks();
+  const byId = planningIndex;
   const self = byId.get(eventId);
   if (!self) return null;
   const day = parisDay.format(self.start);

@@ -1,14 +1,14 @@
-// Intrastek, isolated world: the UI pieces (event popup, right-click menu,
-// "AERs needed" mini-prompt). DOM API only, no innerHTML; every string from
-// the page or the API goes through textContent.
-import { closeAnyOpenMenu } from './dom-inject';
+// Intrastek, isolated world: the two editors, mounted by the planning board's
+// side panel and (the single-event one) by the event modal's popup. DOM API
+// only, no innerHTML; every string from the page or the API goes through
+// textContent.
 import { armable, button, captureEscape, el, errorText, setBusy, spinner, toast } from './shared/ui';
 import { t } from '../i18n/intrastek';
 import {
   api,
   canWrite,
-  fetchStatus,
   cachedState,
+  fetchStatus,
   formatEventDate,
   groupName,
   groupView,
@@ -17,14 +17,14 @@ import {
   proposalSummary,
   resultMessage,
   runWrite,
+  runWrites,
   type GroupView,
 } from './intrastek-client';
 import type { IntrastekEventState, IntrastekMe, IntrastekProposal, IntrastekWriteResult } from '../types';
 
 const POPUP_BACKDROP_CLASS = 'epitools-ik-backdrop';
-const PROMPT_BACKDROP_CLASS = 'epitools-ik-prompt-backdrop';
-const CONFIRM_MS = 3000;
-const MAX_AERS = 999;
+export const CONFIRM_MS = 3000;
+export const MAX_AERS = 999;
 
 export interface EventInfo {
   id: number;
@@ -34,120 +34,89 @@ export interface EventInfo {
 }
 
 // "", "-1", "1.5", "abc" -> null; "0".."999" -> number.
-function parseAers(raw: string): number | null {
+export function parseAers(raw: string): number | null {
   const value = raw.trim();
   if (!/^\d{1,3}$/.test(value)) return null;
   const n = Number(value);
   return n >= 0 && n <= MAX_AERS ? n : null;
 }
 
-function prefillAers(view: GroupView): string {
+export function prefillAers(view: GroupView): string {
   if (view.proposal && view.proposal.nbUserAsk !== null) return String(view.proposal.nbUserAsk);
   return view.nbUserAsk !== null ? String(view.nbUserAsk) : '';
-}
-
-function eventTitle(event: EventInfo): string {
-  return event.title || t('eventFallback', { id: event.id });
 }
 
 function kindLabel(p: IntrastekProposal): string {
   return p.kind === 'INIT' ? t('kindInit') : p.kind === 'UPDATE' ? t('kindUpdate') : t('kindRemove');
 }
 
-function aersInputEl(): HTMLInputElement {
-  const input = el('input', 'epitools-modal-field epitools-ik-number');
+export function aersInputEl(): HTMLInputElement {
+  const input = el('input', 'epitools-ik-number');
   input.type = 'number';
   input.min = '0';
   input.max = String(MAX_AERS);
   input.step = '1';
+  input.inputMode = 'numeric';
   return input;
 }
 
-function groupOptions(select: HTMLSelectElement, me: IntrastekMe, markOwn = false): void {
+function groupSelectEl(me: IntrastekMe, value: string | null): HTMLSelectElement {
+  const select = el('select', 'epitools-ik-select');
   for (const group of me.groups) {
-    const own = markOwn && group.id === me.defaultGroupId;
+    const own = group.id === me.defaultGroupId;
     const opt = el('option', undefined, own ? t('myGroup', { name: group.name }) : group.name);
     opt.value = group.id;
     select.appendChild(opt);
   }
+  if (value) select.value = value;
+  return select;
 }
 
-// --- Event popup (from the planning event modal's "Intrastek" button) ---
-
-export function closeEventPopup(): void {
-  for (const node of Array.from(document.querySelectorAll(`.${POPUP_BACKDROP_CLASS}`))) {
-    (node as HTMLElement & { epitoolsClose?: () => void }).epitoolsClose?.();
-    node.remove();
-  }
+function field(label: string, control: HTMLElement): HTMLElement {
+  const row = el('label', 'epitools-ik-field');
+  row.append(el('span', 'epitools-ik-field-label', label), control);
+  return row;
 }
 
-export function isEventPopupOpenFor(dialog: Element, eventId: number): boolean {
-  const node = dialog.querySelector(`.${POPUP_BACKDROP_CLASS}`);
-  return !!node && node.getAttribute('data-epitools-ik-for') === String(eventId);
-}
+// --- Single-event editor ---
 
-// Mounted inside the intranet's Mantine dialog (like the eval-sheet modal):
-// a popup under <body> would lose focus and wheel events to Mantine's focus
-// trap and scroll lock.
-export function openEventPopup(mountIn: Element, event: EventInfo, me: IntrastekMe, defaultGroupId: string | null): void {
-  closeEventPopup();
-
+/**
+ * State of one event in every group + the actions the key allows on the
+ * chosen group. Fetches a fresh status itself. Returns the destroyer.
+ */
+export function mountEventEditor(
+  container: HTMLElement,
+  event: EventInfo,
+  me: IntrastekMe,
+  defaultGroupId: string | null,
+  opts: { onClose?: () => void; autofocus?: boolean } = {},
+): () => void {
   let state: IntrastekEventState | null = cachedState(event.id);
   let groupId = defaultGroupId;
   let edited = false;
   let busy = false;
+  let alive = true;
   // Which write the API refused with a 409 (AERs assigned), offered again with force.
   let forceOffered: 'remove' | 'approve' | null = null;
-  let writeButtons: HTMLButtonElement[] = [];
   const writable = canWrite(me);
 
-  const backdrop = el('div', POPUP_BACKDROP_CLASS) as HTMLDivElement & { epitoolsClose?: () => void };
-  backdrop.setAttribute('data-epitools-ik-for', String(event.id));
-  const modal = el('div', 'epitools-modal epitools-ik-modal');
-  modal.setAttribute('role', 'dialog');
-  modal.setAttribute('aria-modal', 'true');
-  modal.appendChild(el('h2', 'epitools-modal-title', 'Intrastek'));
-  modal.appendChild(el('div', 'epitools-ik-event-title', eventTitle(event)));
-  const when = formatEventDate(event.start, event.end);
-  if (when) modal.appendChild(el('div', 'epitools-ik-hint', when));
-
-  const groupRow = el('label', 'epitools-ik-row');
-  groupRow.appendChild(el('span', 'epitools-ik-label', t('group')));
-  const groupSelect = el('select', 'epitools-modal-field');
-  groupOptions(groupSelect, me, true);
-  if (groupId) groupSelect.value = groupId;
-  groupRow.appendChild(groupSelect);
-  modal.appendChild(groupRow);
-  if (!me.groups.length) {
-    groupRow.style.display = 'none';
-    modal.appendChild(el('p', 'epitools-modal-error', t('noGroupToTarget')));
-  }
-
-  modal.appendChild(el('div', 'epitools-ik-label', t('currentState')));
+  const root = el('div', 'epitools-ik-editor');
+  const groupSelect = groupSelectEl(me, groupId);
   const stateBox = el('div', 'epitools-ik-state');
-  modal.appendChild(stateBox);
-
-  const aersRow = el('label', 'epitools-ik-row');
-  aersRow.appendChild(el('span', 'epitools-ik-label', t('aersNeeded')));
   const aersInput = aersInputEl();
-  aersRow.appendChild(aersInput);
-  modal.appendChild(aersRow);
-
   const message = el('p', 'epitools-ik-message');
-  message.style.display = 'none';
-  modal.appendChild(message);
-
-  const actions = el('div', 'epitools-modal-actions epitools-ik-actions');
-  modal.appendChild(actions);
-
-  backdrop.appendChild(modal);
-  mountIn.appendChild(backdrop);
+  const actions = el('div', 'epitools-ik-actions');
+  if (me.groups.length) root.appendChild(field(t('group'), groupSelect));
+  else root.appendChild(el('p', 'epitools-ik-message epitools-ik-message--error', t('noGroupToTarget')));
+  root.append(stateBox, field(t('aersNeeded'), aersInput), message, actions);
+  container.appendChild(root);
 
   function setMessage(text: string, kind: 'error' | 'info' = 'error'): void {
     message.textContent = text;
     message.className = `epitools-ik-message epitools-ik-message--${kind}`;
-    message.style.display = text ? '' : 'none';
+    message.hidden = !text;
   }
+  setMessage('');
 
   function currentView(): GroupView | null {
     return state && groupId ? groupView(state, groupId) : null;
@@ -159,11 +128,9 @@ export function openEventPopup(mountIn: Element, event: EventInfo, me: Intrastek
       stateBox.appendChild(spinner());
       return;
     }
-    const groupIds = Array.from(
-      new Set([...state.activities.map((a) => a.groupId), ...state.proposals.map((p) => p.groupId)]),
-    );
+    const groupIds = Array.from(new Set([...state.activities.map((a) => a.groupId), ...state.proposals.map((p) => p.groupId)]));
     if (!groupIds.length) {
-      stateBox.appendChild(el('div', 'epitools-ik-hint', t('stateEmpty')));
+      stateBox.appendChild(el('div', 'epitools-ik-muted', t('stateEmpty')));
       return;
     }
     for (const gid of groupIds) {
@@ -219,9 +186,7 @@ export function openEventPopup(mountIn: Element, event: EventInfo, me: Intrastek
     if (busy || !groupId) return;
     busy = true;
     setMessage('');
-    // Not a re-render (that would drop the clicked button's spinner):
-    // renderAll() rebuilds everything once the write is done.
-    for (const b of writeButtons) b.disabled = true;
+    for (const b of Array.from(actions.querySelectorAll('button'))) b.disabled = true;
     setBusy(btn);
     aersInput.disabled = true;
     groupSelect.disabled = true;
@@ -236,7 +201,7 @@ export function openEventPopup(mountIn: Element, event: EventInfo, me: Intrastek
       setMessage(errorText(err));
     } finally {
       busy = false;
-      renderAll();
+      if (alive) renderAll();
     }
   }
 
@@ -244,17 +209,16 @@ export function openEventPopup(mountIn: Element, event: EventInfo, me: Intrastek
     actions.replaceChildren();
     const view = currentView();
     const gid = groupId;
-    const closeBtn = button(t('close'));
-    closeBtn.addEventListener('click', close);
-
     const buttons: HTMLButtonElement[] = [];
-    const add = (b: HTMLButtonElement, run?: () => void): HTMLButtonElement => {
-      if (run) b.addEventListener('click', run);
+    const add = (label: string, cls: string, run: (b: HTMLButtonElement) => void): HTMLButtonElement => {
+      const b = button(label, cls);
+      b.addEventListener('click', () => run(b));
       buttons.push(b);
       return b;
     };
-    const confirmed = (b: HTMLButtonElement, armedLabel: string, run: () => void): void => {
-      armable(b, run, { armedLabel, ms: CONFIRM_MS });
+    const confirmed = (label: string, armedLabel: string, run: (b: HTMLButtonElement) => void): void => {
+      const b = button(label, 'epitools-ik-btn-danger');
+      armable(b, () => run(b), { armedLabel, ms: CONFIRM_MS });
       buttons.push(b);
     };
     let note = '';
@@ -263,53 +227,37 @@ export function openEventPopup(mountIn: Element, event: EventInfo, me: Intrastek
       note = t('followsNote', { id: view.linkedTo });
     } else if (gid && view) {
       if (me.isAdmin) {
-        const apply = add(button(t('apply'), 'epitools-modal-primary'), () => {
+        add(t('apply'), 'epitools-ik-btn-primary', (b) => {
           const n = readAers();
-          if (n !== null) void perform(apply, () => api.set(event.id, gid, n));
+          if (n !== null) void perform(b, () => api.set(event.id, gid, n));
         });
         if (view.initialized) {
-          const remove = button(t('remove'), 'epitools-ik-danger');
-          confirmed(remove, t('confirmRemove'), () =>
-            void perform(remove, () => api.remove(event.id, gid), undefined, 'remove'),
-          );
+          confirmed(t('remove'), t('confirmRemove'), (b) => void perform(b, () => api.remove(event.id, gid), undefined, 'remove'));
           if (forceOffered === 'remove') {
-            const force = button(t('removeAnyway'), 'epitools-ik-danger');
-            confirmed(force, t('confirmDrop'), () => void perform(force, () => api.remove(event.id, gid, true)));
+            confirmed(t('removeAnyway'), t('confirmDrop'), (b) => void perform(b, () => api.remove(event.id, gid, true)));
           }
         }
         if (view.proposal) {
           const proposal = view.proposal;
-          const approve = add(button(t('approve')), () =>
-            void perform(approve, () => api.approve(proposal.id), undefined, 'approve'),
-          );
-          const reject = add(button(t('reject'), 'epitools-ik-danger'), () =>
-            void perform(reject, () => api.cancel(proposal.id), t('proposalRejected')),
-          );
+          add(t('approve'), '', (b) => void perform(b, () => api.approve(proposal.id), undefined, 'approve'));
+          add(t('reject'), 'epitools-ik-btn-danger', (b) => void perform(b, () => api.cancel(proposal.id), t('proposalRejected')));
           if (forceOffered === 'approve') {
-            const force = button(t('approveAnyway'), 'epitools-ik-danger');
-            confirmed(force, t('confirmDrop'), () => void perform(force, () => api.approve(proposal.id, true)));
+            confirmed(t('approveAnyway'), t('confirmDrop'), (b) => void perform(b, () => api.approve(proposal.id, true)));
           }
         }
       } else {
         const proposal = view.proposal;
         const othersPending = !!proposal && !proposal.mine;
         const mine = proposal && proposal.mine ? proposal : null;
-        const propose = add(button(mine ? t('updateMine') : t('propose'), 'epitools-modal-primary'), () => {
+        add(mine ? t('updateMine') : t('propose'), 'epitools-ik-btn-primary', (b) => {
           const n = readAers();
-          if (n !== null) void perform(propose, () => api.set(event.id, gid, n));
-        });
-        propose.disabled = othersPending;
+          if (n !== null) void perform(b, () => api.set(event.id, gid, n));
+        }).disabled = othersPending;
         if (view.initialized) {
-          const proposeRemoval = add(button(t('proposeRemoval'), 'epitools-ik-danger'), () =>
-            void perform(proposeRemoval, () => api.remove(event.id, gid)),
-          );
-          proposeRemoval.disabled = othersPending || mine?.kind === 'REMOVE';
+          add(t('proposeRemoval'), 'epitools-ik-btn-danger', (b) => void perform(b, () => api.remove(event.id, gid))).disabled =
+            othersPending || mine?.kind === 'REMOVE';
         }
-        if (mine) {
-          const cancelMine = add(button(t('cancelMine')), () =>
-            void perform(cancelMine, () => api.cancel(mine.id), t('proposalCancelled')),
-          );
-        }
+        if (mine) add(t('cancelMine'), '', (b) => void perform(b, () => api.cancel(mine.id), t('proposalCancelled')));
         if (othersPending && proposal) note = t('othersPending', { name: personName(proposal.proposedBy) });
       }
     }
@@ -319,8 +267,11 @@ export function openEventPopup(mountIn: Element, event: EventInfo, me: Intrastek
       if (!writable || busy || !state) b.disabled = true;
       actions.appendChild(b);
     }
-    writeButtons = buttons;
-    actions.appendChild(closeBtn);
+    if (opts.onClose) {
+      const closeBtn = button(t('close'));
+      closeBtn.addEventListener('click', opts.onClose);
+      actions.appendChild(closeBtn);
+    }
     if (note && !message.textContent) setMessage(note, 'info');
   }
 
@@ -343,327 +294,175 @@ export function openEventPopup(mountIn: Element, event: EventInfo, me: Intrastek
   aersInput.addEventListener('input', () => {
     edited = true;
   });
-
-  // Escape closes only this popup, not the intranet's event modal underneath.
-  const removeEscape = captureEscape(() => {
-    if (!busy) close();
-  }, backdrop);
-  function close(): void {
-    removeEscape();
-    backdrop.remove();
-  }
-  backdrop.epitoolsClose = removeEscape;
-
-  // Keep our typing away from the site's keyboard shortcuts.
-  backdrop.addEventListener('keydown', (ev) => ev.stopPropagation());
-  backdrop.addEventListener('click', (ev) => {
-    ev.stopPropagation();
-    if (ev.target === backdrop && !busy) close();
+  aersInput.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Enter') return;
+    ev.preventDefault();
+    actions.querySelector<HTMLButtonElement>('.epitools-ik-btn-primary:not(:disabled)')?.click();
   });
 
   renderAll();
-  aersInput.focus();
-  // Always fresh: the popup is where decisions are made.
+  if (opts.autofocus) aersInput.focus();
+  // Always fresh: the editor is where decisions are made.
   fetchStatus([event.id], true).then(
     () => {
-      if (!backdrop.isConnected) return;
+      if (!alive) return;
       state = cachedState(event.id);
       renderAll();
     },
     (err: unknown) => {
-      if (!backdrop.isConnected) return;
+      if (!alive) return;
       setMessage(errorText(err));
       renderAll();
     },
   );
+
+  return () => {
+    alive = false;
+    root.remove();
+  };
 }
 
-// --- "AERs needed" mini-prompt (from the right-click menu) ---
+// --- Bulk editor (several selected events) ---
 
-function openAersPrompt(opts: {
-  event: EventInfo;
-  me: IntrastekMe;
-  groupId: string;
-  initial: string;
-  submitLabel: string;
-  onSubmit: (groupId: string, nbUserAsk: number) => Promise<void>;
-}): void {
-  for (const node of Array.from(document.querySelectorAll(`.${PROMPT_BACKDROP_CLASS}`))) node.remove();
+// Which selected events a bulk write can go to; the rest are skipped (the API
+// would refuse them, or the state is unknown).
+export function bulkTargets(ids: number[], me: IntrastekMe, gid: string, kind: 'set' | 'remove'): number[] {
+  return ids.filter((id) => {
+    const state = cachedState(id);
+    if (!state) return false;
+    const view = groupView(state, gid);
+    // Followers: 409 "This event follows event N".
+    if (view.linkedTo !== null) return false;
+    if (!me.isAdmin && view.proposal && !view.proposal.mine) return false;
+    if (kind === 'remove') return view.initialized && !(view.proposal?.mine && view.proposal.kind === 'REMOVE');
+    return true;
+  });
+}
 
-  const backdrop = el('div', PROMPT_BACKDROP_CLASS);
-  const box = el('div', 'epitools-modal epitools-ik-prompt');
-  box.setAttribute('role', 'dialog');
-  box.setAttribute('aria-modal', 'true');
-  box.appendChild(el('div', 'epitools-ik-event-title', eventTitle(opts.event)));
-  const when = formatEventDate(opts.event.start, opts.event.end);
-  if (when) box.appendChild(el('div', 'epitools-ik-hint', when));
-
-  let groupId = opts.groupId;
-  if (opts.me.groups.length > 1) {
-    const groupRow = el('label', 'epitools-ik-row');
-    groupRow.appendChild(el('span', 'epitools-ik-label', t('group')));
-    const select = el('select', 'epitools-modal-field');
-    groupOptions(select, opts.me);
-    select.value = groupId;
-    select.addEventListener('change', () => {
-      groupId = select.value;
-    });
-    groupRow.appendChild(select);
-    box.appendChild(groupRow);
-  } else {
-    box.appendChild(el('div', 'epitools-ik-hint', t('groupHint', { name: groupName(opts.me.groups, groupId) })));
+/** `onDone(failedIds)`: the caller replaces the selection (failures stay selected for a retry). */
+export function mountBulkEditor(
+  container: HTMLElement,
+  ids: number[],
+  me: IntrastekMe,
+  defaultGroupId: string | null,
+  onDone: (failedIds: number[]) => void,
+): () => void {
+  const root = el('div', 'epitools-ik-editor');
+  container.appendChild(root);
+  if (!canWrite(me)) {
+    root.appendChild(el('p', 'epitools-ik-message epitools-ik-message--info', t('readOnlyKey')));
+    return () => root.remove();
   }
-
-  const row = el('label', 'epitools-ik-row');
-  row.appendChild(el('span', 'epitools-ik-label', t('aersNeeded')));
+  if (!me.groups.length) {
+    root.appendChild(el('p', 'epitools-ik-message epitools-ik-message--error', t('noGroupToTarget')));
+    return () => root.remove();
+  }
+  let gid = defaultGroupId ?? me.groups[0].id;
+  const groupSelect = groupSelectEl(me, gid);
   const input = aersInputEl();
-  input.value = opts.initial;
-  row.appendChild(input);
-  box.appendChild(row);
+  const status = el('p', 'epitools-ik-message');
+  status.hidden = true;
+  const actions = el('div', 'epitools-ik-actions');
+  const setBtn = button(me.isAdmin ? t('applyAll') : t('proposeAll'), 'epitools-ik-btn-primary');
+  const removeBtn = button(me.isAdmin ? t('removeAll') : t('proposeRemovalAll'), 'epitools-ik-btn-danger');
+  actions.append(setBtn, removeBtn);
+  root.append(field(t('group'), groupSelect), field(t('aersNeeded'), input), status, actions);
+  groupSelect.addEventListener('change', () => (gid = groupSelect.value));
 
-  const error = el('p', 'epitools-modal-error');
-  error.style.display = 'none';
-  box.appendChild(error);
-
-  const actions = el('div', 'epitools-modal-actions');
-  const cancelBtn = button(t('cancel'));
-  const okBtn = button(opts.submitLabel, 'epitools-modal-primary');
-  actions.append(cancelBtn, okBtn);
-  box.appendChild(actions);
-  backdrop.appendChild(box);
-  document.body.appendChild(backdrop);
-
-  let submitting = false;
-  const removeEscape = captureEscape(close, backdrop);
-  function close(): void {
-    removeEscape();
-    backdrop.remove();
+  function say(text: string, kind: 'error' | 'info' = 'info'): void {
+    status.textContent = text;
+    status.className = `epitools-ik-message epitools-ik-message--${kind}`;
+    status.hidden = !text;
   }
-  async function submit(): Promise<void> {
-    if (submitting) return;
-    const n = parseAers(input.value);
-    if (n === null) {
-      error.textContent = t('enterRange', { max: MAX_AERS });
-      error.style.display = '';
+
+  async function run(kind: 'set' | 'remove', n: number): Promise<void> {
+    const targets = bulkTargets(ids, me, gid, kind);
+    const skipped = ids.length - targets.length;
+    if (!targets.length) {
+      say(t('bulkNothing', { skipped }));
       return;
     }
-    submitting = true;
-    setBusy(okBtn);
-    // onSubmit never throws (it toasts its own errors).
-    await opts.onSubmit(groupId, n);
-    close();
+    for (const node of [setBtn, removeBtn, input, groupSelect]) node.disabled = true;
+    say(t('bulkProgress', { done: 0, total: targets.length }));
+    const { done, failed } = await runWrites(
+      targets,
+      // Never force: assignations are only dropped from the single-event editor.
+      (id) => (kind === 'set' ? api.set(id, gid, n) : api.remove(id, gid)),
+      (handled) => say(t('bulkProgress', { done: handled, total: targets.length })),
+    );
+    const summary = t('bulkSummary', { done, skipped, failed: failed.length });
+    toast(failed.length ? `${summary} ${failed[0].message}` : summary, failed.length ? 'error' : 'success');
+    onDone(failed.map((f) => f.id));
   }
-  backdrop.addEventListener('keydown', (ev) => {
-    ev.stopPropagation();
-    if (ev.key === 'Enter') {
-      ev.preventDefault();
-      void submit();
+
+  setBtn.addEventListener('click', () => {
+    const n = parseAers(input.value);
+    if (n === null) {
+      say(t('enterRange', { max: MAX_AERS }), 'error');
+      input.focus();
+      return;
     }
+    void run('set', n);
   });
+  input.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Enter') return;
+    ev.preventDefault();
+    setBtn.click();
+  });
+  armable(removeBtn, () => void run('remove', 0), {
+    armedLabel: t('confirmRemoveAll', { n: bulkTargets(ids, me, gid, 'remove').length }),
+    ms: CONFIRM_MS,
+  });
+  return () => root.remove();
+}
+
+// --- Event modal popup (the modal's "Intrastek" button) ---
+
+export function closeEventPopup(): void {
+  for (const node of Array.from(document.querySelectorAll(`.${POPUP_BACKDROP_CLASS}`))) {
+    (node as HTMLElement & { epitoolsClose?: () => void }).epitoolsClose?.();
+    node.remove();
+  }
+}
+
+export function isEventPopupOpenFor(dialog: Element, eventId: number): boolean {
+  const node = dialog.querySelector(`.${POPUP_BACKDROP_CLASS}`);
+  return !!node && node.getAttribute('data-epitools-ik-for') === String(eventId);
+}
+
+// Mounted inside the intranet's Mantine dialog (like the eval-sheet modal):
+// a popup under <body> would lose focus and wheel events to Mantine's focus
+// trap and scroll lock.
+export function openEventPopup(mountIn: Element, event: EventInfo, me: IntrastekMe, defaultGroupId: string | null): void {
+  closeEventPopup();
+  const backdrop = el('div', POPUP_BACKDROP_CLASS) as HTMLDivElement & { epitoolsClose?: () => void };
+  backdrop.setAttribute('data-epitools-ik-for', String(event.id));
+  const modal = el('div', 'epitools-ik-modal');
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.setAttribute('aria-label', 'Intrastek');
+  modal.append(
+    el('h2', 'epitools-ik-modal-title', 'Intrastek'),
+    el('div', 'epitools-ik-event-title', event.title || t('eventFallback', { id: event.id })),
+  );
+  const when = formatEventDate(event.start, event.end);
+  if (when) modal.appendChild(el('div', 'epitools-ik-muted', when));
+  backdrop.appendChild(modal);
+  mountIn.appendChild(backdrop);
+
+  // Escape closes only this popup, not the intranet's event modal underneath.
+  const removeEscape = captureEscape(close, backdrop);
+  const destroy = mountEventEditor(modal, event, me, defaultGroupId, { onClose: close, autofocus: true });
+  function close(): void {
+    removeEscape();
+    destroy();
+    backdrop.remove();
+  }
+  backdrop.epitoolsClose = removeEscape;
+  // Keep our typing away from the site's keyboard shortcuts.
+  backdrop.addEventListener('keydown', (ev) => ev.stopPropagation());
   backdrop.addEventListener('click', (ev) => {
     ev.stopPropagation();
     if (ev.target === backdrop) close();
   });
-  cancelBtn.addEventListener('click', close);
-  okBtn.addEventListener('click', () => void submit());
-  input.focus();
-  input.select();
-}
-
-// --- Right-click menu on a calendar block (Intrastek mode) ---
-
-export function closeOurMenu(): void {
-  if (document.querySelector('.epitools-menu[data-epitools-ik-menu]')) closeAnyOpenMenu();
-}
-
-export function openBlockMenu(opts: {
-  x: number;
-  y: number;
-  event: EventInfo;
-  me: IntrastekMe;
-  groupId: string | null;
-  onOpenDetails: () => void;
-}): void {
-  closeAnyOpenMenu();
-  const { event, me } = opts;
-  let groupId = opts.groupId;
-  const writable = canWrite(me);
-
-  const menu = el('div', 'epitools-menu epitools-ik-menu');
-  menu.setAttribute('data-epitools-ik-menu', '1');
-  menu.style.left = `${opts.x}px`;
-  menu.style.top = `${opts.y}px`;
-  document.body.appendChild(menu);
-
-  const removeEscape = captureEscape(close, menu);
-  function close(): void {
-    document.removeEventListener('mousedown', onOutside, true);
-    removeEscape();
-    menu.remove();
-  }
-  function onOutside(ev: MouseEvent): void {
-    if (!menu.contains(ev.target as Node)) close();
-  }
-  setTimeout(() => document.addEventListener('mousedown', onOutside, true), 0);
-
-  function item(label: string, run: (() => void) | null, className = ''): HTMLButtonElement {
-    const b = button(label, `epitools-menu-item ${className}`.trim());
-    if (!run) b.disabled = true;
-    else
-      b.addEventListener('click', () => {
-        close();
-        run();
-      });
-    menu.appendChild(b);
-    return b;
-  }
-
-  // The menu is gone by then: a toast says something is happening, and the
-  // result toast replaces it (one toast at a time).
-  async function doWrite(
-    write: () => Promise<IntrastekWriteResult>,
-    done?: string,
-    onConflict?: () => void,
-    conflictLabel = t('removeAnyway'),
-  ): Promise<void> {
-    toast(t('saving'), 'info');
-    try {
-      const res = await runWrite(write);
-      toast(done ?? resultMessage(res), 'success');
-    } catch (err) {
-      if (err instanceof IntrastekError && err.status === 409 && onConflict) {
-        toast(errorText(err), 'error', { label: conflictLabel, run: onConflict });
-      } else {
-        toast(errorText(err), 'error');
-      }
-    }
-  }
-
-  function promptAers(targetId: number, gid: string, view: GroupView, submitLabel: string): void {
-    openAersPrompt({
-      event: { ...event, id: targetId },
-      me,
-      groupId: gid,
-      initial: prefillAers(view),
-      submitLabel,
-      onSubmit: (g, n) => doWrite(() => api.set(targetId, g, n)),
-    });
-  }
-
-  function render(): void {
-    menu.replaceChildren();
-    menu.appendChild(el('div', 'epitools-ik-menu-title', eventTitle(event)));
-
-    if (me.groups.length > 1) {
-      const select = el('select', 'epitools-ik-menu-select');
-      groupOptions(select, me);
-      if (groupId) select.value = groupId;
-      select.addEventListener('change', () => {
-        groupId = select.value;
-        render();
-      });
-      menu.appendChild(select);
-    }
-
-    const state = cachedState(event.id);
-    const gid = groupId;
-    if (!gid) {
-      item(t('keyNoGroup'), null);
-      item(t('openDetails'), opts.onOpenDetails);
-      return;
-    }
-    if (!state) {
-      const loading = el('div', 'epitools-ik-menu-loading');
-      loading.appendChild(spinner());
-      menu.appendChild(loading);
-      item(t('openDetails'), opts.onOpenDetails);
-      return;
-    }
-    const view = groupView(state, gid);
-    const proposal = view.proposal;
-    const othersPending = !me.isAdmin && !!proposal && !proposal.mine;
-    const blocked = !writable || othersPending;
-
-    if (proposal) {
-      menu.appendChild(
-        el(
-          'div',
-          'epitools-ik-menu-note',
-          t('menuProposal', {
-            author: personName(proposal.proposedBy),
-            you: proposal.mine ? t('you') : '',
-            summary: proposalSummary(proposal),
-          }),
-        ),
-      );
-    }
-
-    const submitLabel = me.isAdmin ? t('apply') : proposal?.mine ? t('updateMine') : t('propose');
-    const head = view.linkedTo;
-    if (head !== null) {
-      menu.appendChild(el('div', 'epitools-ik-menu-note', t('partOf', { id: head })));
-      item(t('editOnFirst'), blocked ? null : () => promptAers(head, gid, view, submitLabel));
-      item(t('openDetails'), opts.onOpenDetails);
-      return;
-    }
-    item(view.initialized ? t('editAers') : t('init'), blocked ? null : () => promptAers(event.id, gid, view, submitLabel));
-
-    if (view.initialized) {
-      if (me.isAdmin) {
-        const force = () => void doWrite(() => api.remove(event.id, gid, true));
-        const remove = button(t('remove'), 'epitools-menu-item epitools-ik-danger');
-        if (blocked) remove.disabled = true;
-        armable(
-          remove,
-          () => {
-            close();
-            void doWrite(() => api.remove(event.id, gid), undefined, force);
-          },
-          { armedLabel: t('clickAgainRemove'), ms: CONFIRM_MS },
-        );
-        menu.appendChild(remove);
-      } else {
-        item(
-          t('proposeRemoval'),
-          blocked || proposal?.kind === 'REMOVE' ? null : () => void doWrite(() => api.remove(event.id, gid)),
-          'epitools-ik-danger',
-        );
-      }
-    }
-
-    if (me.isAdmin && proposal && writable) {
-      item(t('approve'), () =>
-        void doWrite(
-          () => api.approve(proposal.id),
-          undefined,
-          () => void doWrite(() => api.approve(proposal.id, true)),
-          t('approveAnyway'),
-        ),
-      );
-      item(t('reject'), () => void doWrite(() => api.cancel(proposal.id), t('proposalRejected')), 'epitools-ik-danger');
-    }
-    if (proposal?.mine && writable) {
-      item(t('cancelMine'), () => void doWrite(() => api.cancel(proposal.id), t('proposalCancelled')));
-    }
-    item(t('openDetails'), opts.onOpenDetails);
-  }
-
-  render();
-  // Keep the menu inside the viewport.
-  const rect = menu.getBoundingClientRect();
-  if (rect.right > window.innerWidth) menu.style.left = `${Math.max(0, opts.x - rect.width)}px`;
-  if (rect.bottom > window.innerHeight) menu.style.top = `${Math.max(window.scrollY, opts.y - rect.height)}px`;
-
-  fetchStatus([event.id]).then(
-    (fetched) => {
-      if (fetched && menu.isConnected) render();
-    },
-    (err: unknown) => {
-      if (!menu.isConnected) return;
-      if (!cachedState(event.id)) {
-        close();
-        toast(errorText(err), 'error');
-      }
-    },
-  );
 }

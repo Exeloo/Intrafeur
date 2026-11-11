@@ -1,0 +1,61 @@
+/* Promotion tags (content/promotion-tags.ts, MAIN world). */
+
+/* Eye button between a tag's label and its ×, in the label's colour (set inline). */
+.epitools-promo-eye {
+  --promo-eye-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 2px 0 4px;
+  padding: 1px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.epitools-promo-eye svg {
+  width: var(--promo-eye-size);
+  height: var(--promo-eye-size);
+}
+
+.epitools-promo-eye:hover { background: rgba(255, 255, 255, 0.12); }
+.epitools-promo-eye:focus-visible { outline: 2px solid var(--mantine-primary-color-filled, #809dfd); }
+
+/* A hidden promotion's tag (our copy): dimmed and struck through. */
+[data-epitools-promo-ghost] > p {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+
+/* Stable tag colours (see COLOR_ATTR in promotion-tags.ts); every Mantine default colour. */
+[data-epitools-promo-color='blue'] { border-color: var(--mantine-color-blue-outline) !important; background: var(--mantine-color-blue-light) !important; }
+[data-epitools-promo-color='blue'] > p, [data-epitools-promo-color='blue'] > button { color: var(--mantine-color-blue-light-color) !important; }
+[data-epitools-promo-color='pink'] { border-color: var(--mantine-color-pink-outline) !important; background: var(--mantine-color-pink-light) !important; }
+[data-epitools-promo-color='pink'] > p, [data-epitools-promo-color='pink'] > button { color: var(--mantine-color-pink-light-color) !important; }
+[data-epitools-promo-color='teal'] { border-color: var(--mantine-color-teal-outline) !important; background: var(--mantine-color-teal-light) !important; }
+[data-epitools-promo-color='teal'] > p, [data-epitools-promo-color='teal'] > button { color: var(--mantine-color-teal-light-color) !important; }
+[data-epitools-promo-color='yellow'] { border-color: var(--mantine-color-yellow-outline) !important; background: var(--mantine-color-yellow-light) !important; }
+[data-epitools-promo-color='yellow'] > p, [data-epitools-promo-color='yellow'] > button { color: var(--mantine-color-yellow-light-color) !important; }
+[data-epitools-promo-color='grape'] { border-color: var(--mantine-color-grape-outline) !important; background: var(--mantine-color-grape-light) !important; }
+[data-epitools-promo-color='grape'] > p, [data-epitools-promo-color='grape'] > button { color: var(--mantine-color-grape-light-color) !important; }
+[data-epitools-promo-color='cyan'] { border-color: var(--mantine-color-cyan-outline) !important; background: var(--mantine-color-cyan-light) !important; }
+[data-epitools-promo-color='cyan'] > p, [data-epitools-promo-color='cyan'] > button { color: var(--mantine-color-cyan-light-color) !important; }
+[data-epitools-promo-color='orange'] { border-color: var(--mantine-color-orange-outline) !important; background: var(--mantine-color-orange-light) !important; }
+[data-epitools-promo-color='orange'] > p, [data-epitools-promo-color='orange'] > button { color: var(--mantine-color-orange-light-color) !important; }
+[data-epitools-promo-color='red'] { border-color: var(--mantine-color-red-outline) !important; background: var(--mantine-color-red-light) !important; }
+[data-epitools-promo-color='red'] > p, [data-epitools-promo-color='red'] > button { color: var(--mantine-color-red-light-color) !important; }
+[data-epitools-promo-color='green'] { border-color: var(--mantine-color-green-outline) !important; background: var(--mantine-color-green-light) !important; }
+[data-epitools-promo-color='green'] > p, [data-epitools-promo-color='green'] > button { color: var(--mantine-color-green-light-color) !important; }
+[data-epitools-promo-color='lime'] { border-color: var(--mantine-color-lime-outline) !important; background: var(--mantine-color-lime-light) !important; }
+[data-epitools-promo-color='lime'] > p, [data-epitools-promo-color='lime'] > button { color: var(--mantine-color-lime-light-color) !important; }
+[data-epitools-promo-color='violet'] { border-color: var(--mantine-color-violet-outline) !important; background: var(--mantine-color-violet-light) !important; }
+[data-epitools-promo-color='violet'] > p, [data-epitools-promo-color='violet'] > button { color: var(--mantine-color-violet-light-color) !important; }
+[data-epitools-promo-color='indigo'] { border-color: var(--mantine-color-indigo-outline) !important; background: var(--mantine-color-indigo-light) !important; }
+[data-epitools-promo-color='indigo'] > p, [data-epitools-promo-color='indigo'] > button { color: var(--mantine-color-indigo-light-color) !important; }
+[data-epitools-promo-color='gray'] { border-color: var(--mantine-color-gray-outline) !important; background: var(--mantine-color-gray-light) !important; }
+[data-epitools-promo-color='gray'] > p, [data-epitools-promo-color='gray'] > button { color: var(--mantine-color-gray-light-color) !important; }
+[data-epitools-promo-color='dark'] { border-color: var(--mantine-color-dark-outline) !important; background: var(--mantine-color-dark-light) !important; }
+[data-epitools-promo-color='dark'] > p, [data-epitools-promo-color='dark'] > button { color: var(--mantine-color-dark-light-color) !important; }
